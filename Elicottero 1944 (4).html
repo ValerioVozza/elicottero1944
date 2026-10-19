@@ -1,0 +1,1639 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Elicottero 1944</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+:root{
+  --frame:#6C5EB5; --ink:#FFFFFF; --muted:#D8D2F5; --btn:#352879; --btn-ink:#FFFFFF; --btn-edge:#9A8FE0;
+  color-scheme: light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --frame:#1E1650; --ink:#FFFFFF; --muted:#9A8FE0; --btn:#352879; --btn-ink:#FFFFFF; --btn-edge:#6C5EB5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --frame:#1E1650; --ink:#FFFFFF; --muted:#9A8FE0; --btn:#352879; --btn-ink:#FFFFFF; --btn-edge:#6C5EB5;
+  color-scheme: dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{height:100%; scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  height:100%; margin:0; background:var(--frame); color:var(--ink);
+  font-family:"Press Start 2P", ui-monospace, "Courier New", monospace;
+  display:flex; flex-direction:column; overflow:hidden; overscroll-behavior:none;
+  -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+}
+#stage{flex:1; min-height:0; display:flex; align-items:center; justify-content:center; position:relative; padding:8px}
+canvas{
+  display:block; image-rendering:crisp-edges; image-rendering:pixelated;
+  background:#000; touch-action:none; max-width:100%; height:auto !important; aspect-ratio:320/200;
+}
+canvas:focus-visible{outline:3px solid #B8C76F; outline-offset:3px}
+.legend{
+  font-size:10px; line-height:1.8; color:var(--muted); text-align:center;
+  padding:0 12px 12px; max-width:100%;
+}
+.legend kbd{font-family:inherit; color:var(--ink)}
+.pad{
+  display:flex; justify-content:space-between; align-items:flex-end; gap:16px;
+  padding:8px 16px 16px; touch-action:none;
+}
+.pad[hidden],.legend[hidden]{display:none}
+.dpad{display:grid; grid-template-columns:repeat(3,56px); grid-template-rows:repeat(3,56px); gap:4px}
+.pad button{
+  font-family:inherit; font-size:14px; color:var(--btn-ink); background:var(--btn);
+  border:2px solid var(--btn-edge); border-radius:6px; touch-action:none;
+  -webkit-tap-highlight-color:transparent; opacity:.92;
+}
+.pad button.on{background:var(--btn-edge); color:#000}
+.dpad .up{grid-column:2; grid-row:1}
+.dpad .left{grid-column:1; grid-row:2}
+.dpad .right{grid-column:3; grid-row:2}
+.dpad .down{grid-column:2; grid-row:3}
+.act{display:flex; gap:10px; align-items:flex-end}
+.act button{width:84px; height:84px; border-radius:50%; font-size:10px}
+.act .fire{width:96px; height:96px}
+@media (orientation:landscape) and (pointer:coarse){
+  .pad{position:fixed; left:0; right:0; bottom:env(safe-area-inset-bottom,0px); pointer-events:none;
+       padding-left:calc(12px + env(safe-area-inset-left,0px)); padding-right:calc(12px + env(safe-area-inset-right,0px))}
+  .pad button{pointer-events:auto; opacity:.55}
+  .dpad{grid-template-columns:repeat(3,48px); grid-template-rows:repeat(3,48px)}
+  .act button{width:70px; height:70px}
+  .act .fire{width:80px; height:80px}
+}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="game" width="320" height="200" tabindex="0" aria-label="Elicottero 1944, le missioni del Capitano Jack Grizzly Miller"></canvas></div>
+<p class="legend" id="legend"><kbd>Frecce</kbd>/<kbd>WASD</kbd> vola &nbsp; <kbd>Spazio</kbd> spara &nbsp; <kbd>X</kbd> bomba &nbsp; <kbd>P</kbd> pausa &nbsp; <kbd>M</kbd> audio</p>
+<div class="pad" id="pad" hidden>
+  <div class="dpad">
+    <button class="up" data-k="up" aria-label="Sali">▲</button>
+    <button class="left" data-k="left" aria-label="Sinistra">◀</button>
+    <button class="right" data-k="right" aria-label="Destra">▶</button>
+    <button class="down" data-k="down" aria-label="Scendi">▼</button>
+  </div>
+  <div class="act">
+    <button class="bomb" data-k="bomb">Bomba</button>
+    <button class="fire" data-k="fire">Fuoco</button>
+  </div>
+</div>
+<script>
+(() => {
+'use strict';
+const C = {black:'#000000',white:'#FFFFFF',red:'#68372B',cyan:'#70A4B2',purple:'#6F3D86',green:'#588D43',
+  blue:'#352879',yellow:'#B8C76F',orange:'#6F4F25',brown:'#433900',lred:'#9A6759',dgrey:'#444444',
+  grey:'#6C6C6C',lgreen:'#9AD284',lblue:'#6C5EB5',lgrey:'#959595',
+  gold:'#E0B840',lava1:'#E8642A',lava2:'#F5C542',flagRed:'#B83A30',flagBlue:'#2D3F8C',khaki:'#B8A070'};
+const W=320, H=200, GROUND=180, MAX_LIVES=5;
+const COAST=700, CARRIER0=2150, CARRIER1=2500, CARRIER_DOOR=2440;
+const FUEL_MAX=7200, RESERVE=900, REPAIR_T=1800, CALM_T=3600, SIEGE_EVERY=300;
+const FONT='"Press Start 2P", ui-monospace, monospace';
+
+const MISSIONS=[
+  {kind:'rescue', name:'Vesuvio', date:'Marzo 1944', theme:'vesuvio', terrain:'vesuvio', world:1700, baseX:1450, cap:6, timer:90,
+   camps:[{x:430,n:10},{x:920,n:10}], bunkers:[], per:0, tanks:0, jets:0, keep:0, people:'civ',
+   brief:['Grizzly, il Vesuvio si risveglia.','Due campi di sfollati sul','vulcano. Portali tutti a Napoli.'],
+   threats:['Nessun nemico, ma sbrigati:','eruzione tra 1 minuto e 30','Posti a bordo: 6']},
+  {kind:'airlift', name:'Berlino', date:'Aprile 1949', theme:'berlino', world:2600, trips:2, officers:4, tanks:0, jets:0, keep:0,
+   timer:150, tripSpawn:{tanks:2,jets:1},
+   brief:['Berlino Ovest è sotto blocco.','Porta i rifornimenti, poi','riporta indietro gli ufficiali.'],
+   threats:['Viaggi richiesti: 2','Ogni viaggio: 2 carri e 1 aereo','Tempo: 2 minuti e 30','Ufficiali per viaggio: 4']},
+  {kind:'airlift', name:'Berlino', date:'Maggio 1949', theme:'berlino2', world:2600, trips:5, officers:4, tanks:8, jets:1, keep:0,
+   timer:300, refill:true,
+   brief:['Il blocco non molla, Grizzly.','Serve un ponte continuo:','cinque viaggi andata e ritorno.'],
+   threats:['Viaggi richiesti: 5','Carri armati: 8  Aereo: 1','Tornano a ogni nuovo viaggio','Tempo: 5 minuti']},
+  {kind:'rescue', name:'Kaesong', date:'25 giugno 1950', theme:'kaesong', world:2600, baseX:2380, cap:12,
+   camps:[], bunkers:[500,1100], per:8, tanks:0, jets:0, keep:0, people:'korea',
+   brief:['Il Nord ha varcato il confine.','Kaesong è sotto attacco:','evacua chi è nei rifugi.']},
+  {kind:'rescue', name:'Uijeongbu', date:'26 giugno 1950', theme:'uijeongbu', world:2600, baseX:2380, cap:12,
+   camps:[], bunkers:[400,950,1500], per:8, tanks:4, jets:0, keep:0, people:'korea',
+   brief:['Le colonne puntano su Seul.','Uijeongbu resiste a fatica.','Porta via tutti, Grizzly.']},
+  {kind:'rescue', name:'Munsan', date:'27 giugno 1950', theme:'munsan', world:2600, baseX:2380, cap:12,
+   camps:[], bunkers:[300,750,1200,1650], per:8, tanks:8, jets:1, keep:0, people:'korea',
+   brief:['Pioggia e fango sull\u2019Imjin.','Un aereo nemico pattuglia','la valle. Occhi aperti.']},
+  {kind:'rescue', name:'Seul', date:'27 giugno 1950', theme:'seul', world:2600, baseX:2380, cap:12,
+   camps:[], bunkers:[300,750,1200,1650], per:10, tanks:12, jets:2, keep:0, people:'korea',
+   brief:['I carri sono alle porte','della capitale. Due aerei','nemici sopra i tetti.']},
+  {kind:'rescue', name:'Ponte sull\u2019Han', date:'28 giugno 1950', theme:'han', world:2600, baseX:2380, cap:12,
+   camps:[], bunkers:[250,650,1050,1450,1850], per:10, tanks:12, jets:3, keep:4, people:'korea',
+   brief:['Ultima notte prima del ponte.','Il nemico non dà tregua:','salva chi puoi e rientra.']},
+  {kind:'dogfight', name:'Baia dei Porci', date:'Aprile 1961', theme:'baia', terrain:'sea', world:2600, cap:0, heli:'huey',
+   redFatal:true, noRepair:true, bonusLives:2, homing:true, bursts:3, diff:6, planes:[{},{},{},{red:true,jet:true}], tanks:0, jets:4, keep:0,
+   brief:['Grizzly, questa sarà la tua','ultima missione: tre voli e','poi la pensione. Buona fortuna.'],
+   threats:['Abbatti 3 aerei cubani','e 1 aereo russo (rosso)','Il rosso uccide in un colpo','Poi atterra sulla portaerei']},
+  {kind:'rescue', name:'Guantanamo', date:'Salvataggio, aprile 1961', theme:'cuba', world:2600, baseX:2380, cap:16, heli:'huey', house:'casa',
+   bunkers:[300,750,1200,1650], per:20, tanks:10, respawnTanks:5, planes:[{},{}], jets:2, keep:0, people:'us', diff:7, bursts:2,
+   brief:['Ottanta soldati isolati','in quattro case. Riportali','alla base di Guantanamo.'],
+   threats:['Carri armati: 10, 5 tornano','Aerei cubani: 2','Posti a bordo: 16']},
+  {kind:'evac', name:'Guantanamo', date:'Ritiro, aprile 1961', theme:'gitmo', terrain:'sea', world:2600, cap:16, heli:'huey', evacTotal:100,
+   planes:[{},{},{},{},{respawn:true},{red:true,jet:true,respawn:true}], tanks:0, jets:6, keep:0, people:'us', diff:7, bursts:2, homing:true,
+   brief:['Si lascia la base: porta','100 soldati sulla portaerei.','Poi, finalmente, a casa.'],
+   threats:['Aerei cubani: 5, uno torna','Aereo russo: torna sempre','Posti a bordo: 16']},
+  {kind:'rescue', name:'Quang Tri', date:'Aprile 1972', theme:'quangtri', world:2600, baseX:2380, cap:12, heli:'huey', house:'viet',
+   bunkers:[400,950,1500], per:8, tanks:4, jets:1, planeJet:true, keep:0, people:'viet', diff:6, bursts:2,
+   brief:['Grizzly, niente pensione.','Agli USA servono tutte le','forze in questo momento.']},
+  {kind:'rescue', name:'Hue', date:'Marzo 1975', theme:'hue', world:2600, baseX:2380, cap:12, heli:'huey', house:'viet',
+   bunkers:[300,750,1200,1650], per:10, tanks:8, jets:2, planeJet:true, keep:0, people:'viet', diff:7, bursts:2,
+   brief:['La città imperiale cade.','Porta via chi resta nella','Cittadella, Grizzly.']},
+  {kind:'rescue', name:'Da Nang', date:'Marzo 1975', theme:'danang', world:2600, baseX:2380, cap:12, heli:'huey', house:'viet',
+   bunkers:[300,750,1200,1650], per:10, tanks:12, jets:2, planeJet:true, keep:3, people:'viet', diff:8, bursts:2,
+   brief:['Il porto è nel caos: tutti','cercano un posto sull\u2019ultimo','elicottero in partenza.']},
+  {kind:'rescue', name:'Xuan Loc', date:'Aprile 1975', theme:'xuanloc', world:2600, baseX:2380, cap:12, heli:'huey', house:'viet',
+   bunkers:[250,650,1050,1450,1850], per:10, tanks:14, jets:3, planeJet:true, keep:4, people:'viet', diff:9, bursts:2,
+   brief:['L\u2019ultima linea di difesa','prima di Saigon. Tieni duro','e porta via tutti.']},
+  {kind:'rescue', name:'Saigon', date:'29 aprile 1975', theme:'saigon', world:2600, baseX:2380, cap:12, heli:'huey', house:'viet',
+   bunkers:[450,850,1250,1650,2000], per:12, tanks:16, jets:4, planeJet:true, keep:6, people:'viet', diff:10, bursts:3, palace:true,
+   brief:['Operazione Frequent Wind:','l\u2019ultimo volo della guerra.','Poi a casa. Stavolta davvero.']}
+];
+
+const cv=document.getElementById('game'), ctx=cv.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const R=(x,y,w,h,c)=>{ctx.fillStyle=c; ctx.fillRect(Math.floor(x),Math.floor(y),w,h);};
+const rnd=(a,b)=>a+Math.random()*(b-a);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const hsh=n=>{ let x=Math.imul((n|0)^0x5bd1e995,2654435761)>>>0; x^=x>>>15; x=Math.imul(x,2246822519)>>>0; x^=x>>>13; return x%1000; };
+const mod=(a,n)=>((a%n)+n)%n;
+
+// ---------- Input ----------
+const keys={left:0,right:0,up:0,down:0,fire:0,bomb:0};
+const KM={ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right',ArrowUp:'up',KeyW:'up',
+  ArrowDown:'down',KeyS:'down',Space:'fire',KeyZ:'fire',KeyX:'bomb',KeyB:'bomb'};
+let paused=false, muted=false, best=0;
+try{ best=+(localStorage.getItem('elicottero1944-best')||0)||0; }catch(e){}
+
+addEventListener('keydown',e=>{
+  initAudio();
+  const k=KM[e.code];
+  if(k){ keys[k]=1; e.preventDefault(); }
+  if((e.code==='Space'||e.code==='Enter') && S.mode!=='play') advance();
+  if(e.code==='KeyP' && S.mode==='play') paused=!paused;
+  if(e.code==='KeyM') muted=!muted;
+  if(e.code==='KeyQ' && S.mode!=='play' && S.mode!=='roll'){ newGame(); startLevel(MISSIONS.findIndex(m=>m.theme==='baia')); }
+});
+addEventListener('keyup',e=>{ const k=KM[e.code]; if(k) keys[k]=0; });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=0; });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && S.mode==='play') paused=true; });
+cv.addEventListener('pointerdown',()=>{ initAudio(); cv.focus(); if(S.mode!=='play') advance(); else if(paused) paused=false; });
+
+const coarse=matchMedia('(pointer:coarse)').matches;
+const pad=document.getElementById('pad'), legend=document.getElementById('legend');
+if(coarse){ pad.hidden=false; legend.hidden=true; }
+pad.querySelectorAll('button').forEach(b=>{
+  const k=b.dataset.k;
+  const on=e=>{ e.preventDefault(); initAudio(); try{b.setPointerCapture(e.pointerId);}catch(_){}
+    keys[k]=1; b.classList.add('on'); if(S.mode!=='play') advance(); if(paused) paused=false; };
+  const off=()=>{ keys[k]=0; b.classList.remove('on'); };
+  b.addEventListener('pointerdown',on);
+  b.addEventListener('pointerup',off);
+  b.addEventListener('pointercancel',off);
+  b.addEventListener('lostpointercapture',off);
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+});
+
+const stage=document.getElementById('stage');
+function fit(){
+  const aw=stage.clientWidth-16, ah=stage.clientHeight-16;
+  let s=Math.min(aw/W, ah/H);
+  if(s>=2) s=Math.floor(s);
+  s=Math.max(s,0.5);
+  cv.style.width=Math.floor(W*s)+'px';
+  cv.style.height='';
+}
+new ResizeObserver(fit).observe(stage);
+addEventListener('resize',fit);
+
+// ---------- Audio ----------
+let ac=null, noiseBuf=null;
+function initAudio(){
+  if(ac){ if(ac.state==='suspended') ac.resume(); return; }
+  try{
+    ac=new (window.AudioContext||window.webkitAudioContext)();
+    noiseBuf=ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const d=noiseBuf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  }catch(e){ ac=null; }
+}
+function tone(f1,f2,dur,type,vol){
+  if(!ac||muted) return;
+  const t=ac.currentTime, o=ac.createOscillator(), g=ac.createGain();
+  o.type=type; o.frequency.setValueAtTime(f1,t); o.frequency.exponentialRampToValueAtTime(f2,t+dur);
+  g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(ac.destination); o.start(t); o.stop(t+dur+0.02);
+}
+function noise(dur,vol,freq){
+  if(!ac||muted||!noiseBuf) return;
+  const t=ac.currentTime, s=ac.createBufferSource(), f=ac.createBiquadFilter(), g=ac.createGain();
+  s.buffer=noiseBuf; f.type='lowpass'; f.frequency.setValueAtTime(freq,t); f.frequency.exponentialRampToValueAtTime(80,t+dur);
+  g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  s.connect(f); f.connect(g); g.connect(ac.destination); s.start(t); s.stop(t+dur+0.02);
+}
+const SFX={
+  shot:()=>tone(1000,300,0.06,'square',0.025),
+  bomb:()=>tone(700,180,0.3,'triangle',0.05),
+  boom:()=>noise(0.6,0.3,900),
+  small:()=>noise(0.18,0.14,1600),
+  hit:()=>{noise(0.25,0.22,2500); tone(220,70,0.25,'sawtooth',0.04);},
+  board:()=>tone(660,990,0.07,'square',0.035),
+  saved:()=>tone(880,1320,0.1,'triangle',0.05),
+  ouch:()=>tone(420,140,0.15,'sawtooth',0.03),
+  tank:()=>tone(240,90,0.12,'square',0.035),
+  mg:()=>noise(0.05,0.08,3000),
+  plane:()=>tone(120,160,0.8,'sawtooth',0.02),
+  thud:()=>noise(0.1,0.15,400),
+  tick:()=>tone(1200,1100,0.03,'square',0.02),
+  rumble:()=>noise(1.6,0.35,300),
+  open:()=>{tone(330,660,0.12,'square',0.04); setTimeout(()=>tone(495,990,0.12,'square',0.04),110);},
+  fanfare:()=>{[523,659,784,1047].forEach((f,i)=>setTimeout(()=>tone(f,f*1.01,0.18,'square',0.04),i*140));}
+};
+const sfx=n=>{ try{ SFX[n](); }catch(e){} };
+
+// ---------- Stato ----------
+let S;
+function gy(x){ const i=x<0?0:x>S.world?S.world:(x|0); return S.hm[i]; }
+function buildTerrain(M){
+  const hm=new Float32Array(M.world+1).fill(GROUND);
+  if(M.terrain==='vesuvio'){
+    const top=1380;
+    for(let x=0;x<=M.world;x++){
+      let y=GROUND;
+      if(x<top){
+        const t=(top-x)/top;
+        y=GROUND-100*Math.pow(t,1.25)+3*Math.sin(x*0.031)+2*Math.sin(x*0.083);
+      }
+      if(x<90) y+=13*Math.sin(Math.PI*x/90);
+      hm[x]=y;
+    }
+    for(const c of M.camps){
+      const fy=hm[c.x];
+      for(let x=c.x-80;x<=c.x+80;x++){
+        const d=Math.abs(x-c.x), k=d<50?1:1-(d-50)/30;
+        hm[x]=hm[x]*(1-k)+fy*k;
+      }
+    }
+  }
+  if(M.terrain==='sea'){
+    for(let x=0;x<=M.world;x++){
+      let y=GROUND;
+      if(x>=COAST) y=x<COAST+20?GROUND+(x-COAST)/5:184;
+      if(x>=CARRIER0 && x<=CARRIER1) y=160;
+      hm[x]=y;
+    }
+  }
+  return hm;
+}
+function isWater(x){ return S.M.terrain==='sea' && x>=COAST+20 && !(x>=CARRIER0 && x<=CARRIER1); }
+function onCarrier(x){ return S.M.terrain==='sea' && x>=CARRIER0+6 && x<=CARRIER1-6; }
+const DIFF=()=>S.M.diff!=null?S.M.diff:S.level;
+function newGame(){
+  S={mode:'intro',lives:3,totSaved:0,totDead:0,totAll:0,level:0,t:0,parts:[],people:[],tanks:[],planes:[],
+     bullets:[],bombs:[],shells:[],bunkers:[],camX:0,msg:'',msgT:0,overT:0,introT:0,newBest:false,bonus:false,
+     retried:{},retriesUsed:0,rollT:0,rollTarget:0,pct:0,passed:false,failReason:'',world:2600,hm:null};
+  startLevel(0);
+}
+function titleState(){ newGame(); S.mode='title'; }
+function pickLook(M){
+  if(M.people==='us') return 'sold';
+  if(M.people==='civ') return 'civ'+((Math.random()*4)|0);
+  return Math.random()<0.6?'kciv':'sold';
+}
+function newPerson(x,home,state,look){
+  return {x,home,state,look,vx:rnd(-0.4,0.4),t:rnd(20,60),anim:(Math.random()*30)|0,dest:0};
+}
+function newTank(x){ return {x,post:x,dir:-1,hp:3,cool:rnd(60,140),anim:(Math.random()*20)|0,dead:false,fire:0}; }
+function tankRange(){ return S.M.kind==='airlift'?[380,S.world-380]:[10,S.M.baseX-90]; }
+function safe(x){
+  const M=S.M;
+  if(M.terrain==='sea') return x<300||(x>=CARRIER0&&x<=CARRIER1);
+  return M.kind==='airlift'?(x<300||x>S.world-300):x>=M.baseX;
+}
+
+function startLevel(n){
+  const M=MISSIONS[n];
+  Object.assign(S,{level:n,M,mode:'intro',introT:0,t:0,levelStartLives:S.lives,world:M.world,saved:0,dead:0,
+    people:[],bullets:[],bombs:[],shells:[],parts:[],tanks:[],keepT:0,unloadT:0,fullWarned:false,msg:'',msgT:0,
+    respawn:0,bonus:false,trips:0,delivered:false,crates:0,timeLeft:(M.timer||0)*60,erupted:false,lavaX:90,minuteWarned:false,spawnedTrips:{},tankRespawns:[],queue:M.evacTotal||0,warnedLand:false,officerPenalty:0,calmT:0,siegeT:0,sieging:false,presidentDead:false,palaceCalled:false});
+  S.hm=buildTerrain(M);
+  S.cap=M.kind==='airlift'?M.officers:M.cap;
+  S.door=M.kind==='airlift'?60:M.terrain==='sea'?CARRIER_DOOR:M.baseX+150;
+  S.bunkers=(M.bunkers||[]).map(x=>({x,w:44,h:22,hp:4,open:false,inside:M.per,releaseT:0}));
+  S.total=M.kind==='evac'?M.evacTotal:(M.kind==='airlift'||M.kind==='dogfight')?0:(M.bunkers||[]).length*(M.per||0)+(M.camps||[]).reduce((a,c)=>a+c.n,0);
+  if(M.palace) S.total+=12;  for(const c of (M.camps||[])) for(let i=0;i<c.n;i++) S.people.push(newPerson(c.x+rnd(-30,30),c.x+rnd(-20,20),'wander',pickLook(M)));
+  const [lo,hi]=M.kind==='airlift'?[450,M.world-450]:[150,M.baseX-300];
+  for(let i=0;i<M.tanks;i++) S.tanks.push(newTank(Math.round(lo+(i+0.5)*(hi-lo)/M.tanks+rnd(-30,30))));
+  { let rc=M.respawnTanks||0; for(let i=0;i<S.tanks.length&&rc>0;i+=2){ S.tanks[i].respawn=true; rc--; } }
+  const pl=M.planes||Array.from({length:M.jets},()=>({}));
+  const df=M.kind==='dogfight';
+  S.planes=pl.map((d,i)=>({dead:false,flying:false,wait:(df?200:520)+i*(df?200:260),x:0,y:0,vx:0,dir:1,fired:0,burst:0,bt:0,ft:0,
+    red:!!d.red,jet:!!(d.jet||M.planeJet),respawn:!!d.respawn}));
+  spawnHeli();
+  S.camX=clamp(S.heli.x-W/2,0,S.world-W);
+}
+function spawnHeli(){
+  const air=S.M.kind==='airlift'||S.M.terrain==='sea';
+  const x=air?180:S.M.baseX+50;
+  S.heli={x,y:gy(x),vx:0,vy:0,face:air?1:-1,ground:true,pass:0,cargo:0,loadT:0,hp:S.M.oneHit?1:3,inv:90,cool:0,bcool:0,alive:true,fuel:FUEL_MAX,reserve:0,falling:false,repT:0};
+}
+function advance(){
+  if(S.mode==='title') newGame();
+  else if(S.mode==='intro' && S.introT>30) beginPlay();
+  else if(S.mode==='clear' && S.overT>50) startLevel(S.level+1);
+  else if(S.mode==='retry' && S.overT>50){
+    S.retried[S.level]=true; S.retriesUsed++;
+    S.lives=Math.max(1,S.levelStartLives);
+    startLevel(S.level);
+  }
+  else if((S.mode==='over'||S.mode==='win') && S.overT>50) newGame();
+}
+function beginPlay(){
+  S.mode='play'; paused=false;
+  const M=S.M;
+  if(M.kind==='dogfight') say('Abbatti gli aerei, poi la portaerei',200);
+  else if(M.kind==='evac') say('Porta i soldati sulla portaerei',200);
+  else if(M.kind==='airlift') say('Carico in corso: poi vola a Berlino',200);
+  else if(M.timer) say('Vola a sinistra verso i campi',200);
+  else say(M.tanks?'Attenzione: forze nemiche in zona':'Vola a sinistra e apri i rifugi',200);
+}
+function say(text,dur){ S.msg=text; S.msgT=dur||120; }
+
+function burst(x,y,n,cols,spd,life){
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2, v=Math.random()*spd;
+    S.parts.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v-spd*0.4,life:rnd(life*0.5,life),col:cols[(Math.random()*cols.length)|0],s:Math.random()<0.3?2:1});
+  }
+}
+const FIRE=[C.lava2,C.white,C.lava1,C.lred,C.red];
+const ONGROUND={wander:1,run:1,wait:1,toBase:1};
+
+function killPerson(p){
+  if(p.state==='dead'||p.state==='gone') return;
+  p.state='dead'; S.dead++;
+  if(p.vip){ S.presidentDead=true; say('Il presidente è stato ucciso!',150); }
+  if(S.M.kind==='airlift' && p.look==='off' && S.heli.alive && !(S.officerPenalty>0)){
+    S.officerPenalty=600; say('Ufficiale ucciso! Abbattuto tra 10',70);
+  }
+  burst(p.x,gy(p.x)-3,6,[C.lred,C.red,C.white],1.2,25);
+  sfx('ouch');
+}
+function openBunker(b){
+  if(b.open) return;
+  b.open=true; b.hp=0; b.releaseT=20;
+  burst(b.x+b.w/2,GROUND-14,30,[C.grey,C.lgrey,C.white,C.orange],2.2,40);
+  sfx('boom'); setTimeout(()=>sfx('open'),200);
+  say('Civili liberi: atterra vicino a loro',160);
+}
+const TANK_RETURN=900; // 15 secondi
+function killTank(t){
+  if(t.dead) return; t.dead=true;
+  if(t.respawn) S.tankRespawns.push(TANK_RETURN);
+  else if(S.M.keep>0){
+    const alive=S.tanks.filter(q=>!q.dead).length+S.tankRespawns.length;
+    if(alive<S.M.keep) S.tankRespawns.push(TANK_RETURN);
+  }
+  burst(t.x,gy(t.x)-6,34,FIRE,2.4,45); sfx('boom');
+}
+function killPlane(p){
+  if(p.dead||!p.flying) return;
+  p.flying=false;
+  burst(p.x,p.y,30,FIRE,2.2,45); sfx('boom');
+  if(p.respawn){ p.wait=p.red?1800:900; say(p.red?'Abbattuto: torna tra 30 s':'Abbattuto: torna tra 15 s',110); return; }
+  p.dead=true;
+  const left=S.planes.filter(q=>!q.dead).length;
+  say(left?'Aereo abbattuto, ne restano '+left:'Cielo libero!',120);
+}
+function hurtHeli(dmg){
+  const h=S.heli;
+  if(!h.alive||h.inv>0) return;
+  // Dalle missioni cubane: a terra servono 3 colpi per fare un danno
+  if(h.ground && S.level>=MISSIONS.findIndex(m=>m.theme==='baia')){
+    h.gHits=(h.gHits||0)+1;
+    if(h.gHits<3){ h.inv=20; burst(h.x,h.y-6,5,[C.white,C.lgrey],1,12); sfx('small'); return; }
+    h.gHits=0;
+  }
+  h.hp-=S.M.oneHit?h.hp:dmg; h.inv=50;
+  burst(h.x,h.y-6,10,[C.white,C.lava2],1.6,20);
+  sfx('hit');
+  if(h.hp<=0) destroyHeli();
+}
+function destroyHeli(){
+  const h=S.heli;
+  burst(h.x,h.y-6,60,FIRE,3,60);
+  burst(h.x,h.y-6,20,[C.dgrey,C.grey],1.5,70);
+  sfx('boom'); setTimeout(()=>sfx('boom'),150);
+  if(h.pass>0){ S.dead+=h.pass; say(h.pass+(h.pass===1?' persona persa':' persone perse'),150); }
+  else if(h.cargo) say('Rifornimenti perduti',120);
+  else say('Elicottero abbattuto',120);
+  if(S.M.kind==='airlift' && S.delivered && !S.people.some(p=>p.state==='wait'||p.state==='run')) S.delivered=false;
+  if(h.vipAboard){ S.presidentDead=true; h.vipAboard=false; }
+  h.pass=0; h.cargo=0; h.alive=false; S.lives--; S.respawn=150;
+}
+
+// ---------- Logica ----------
+function fuelTick(h){
+  const M=S.M;
+  // Alla base: rifornimento e riparazione
+  if(h.ground && safe(h.x)){
+    if(h.fuel<FUEL_MAX){
+      if(h.fuel<=0) say('Rifornimento in corso',90);
+      h.fuel=Math.min(FUEL_MAX,h.fuel+40); h.reserve=0;
+      if(S.t%10===0) sfx('tick');
+    }
+    if(!M.noRepair && h.hp<3){
+      if(++h.repT>=REPAIR_T){ h.repT=0; h.hp++; sfx('board'); say(h.hp>=3?'Riparazione completata':'Riparazione in corso',80); }
+    }
+  }else h.repT=0;
+  // Consumo in volo: 2 minuti di autonomia
+  if(!h.ground && h.fuel>0){
+    h.fuel--;
+    if(h.fuel===1800) say('Carburante basso: torna alla base',150);
+    if(h.fuel===0){ h.reserve=RESERVE; say('Riserva! Atterra alla base: 15',70); sfx('rumble'); }
+  }
+  // Riserva: 15 secondi senza salita né armi, poi si precipita
+  if(h.fuel<=0){
+    if(h.reserve<=0) h.reserve=RESERVE;
+    h.reserve--;
+    if(h.reserve>0 && h.reserve%60===0) say('Riserva! Atterra alla base: '+(h.reserve/60),70);
+    if(h.reserve<=0){
+      if(h.ground){ h.inv=0; h.hp=0; say('Senza carburante!',120); destroyHeli(); }
+      else{ h.falling=true; say('Senza carburante!',120); sfx('hit'); }
+    }
+  }
+}
+function updHeli(h){
+  if(h.falling){
+    h.vy=Math.min(h.vy+0.12,4); h.vx*=0.98; h.x+=h.vx; h.y+=h.vy;
+    if(S.t%3===0) S.parts.push({x:h.x,y:h.y-10,vx:rnd(-0.3,0.3),vy:-0.5,life:30,col:C.dgrey,s:2});
+    if(h.y>=gy(h.x)){ h.y=gy(h.x); h.inv=0; h.hp=0; destroyHeli(); }
+    return;
+  }
+  fuelTick(h);
+  if(!h.alive||h.falling) return;
+  const dry=h.fuel<=0;
+  const ax=keys.right-keys.left, ay=keys.down-(dry?0:keys.up);
+  if(ax) h.face=ax;
+  if(h.ground){
+    h.vx=0; h.vy=0; h.y=gy(h.x);
+    if(ay<0){ h.ground=false; h.vy=-1; h.y-=1; h.loadT=0; S.warnedLand=false; h.gHits=0; }
+  }else{
+    h.vx+=ax*0.08; h.vx*=0.985; h.vx=clamp(h.vx,-2.3,2.3);
+    h.vy+=ay*0.09; if(dry) h.vy+=0.02; h.vy*=0.94; h.vy=clamp(h.vy,-1.6,1.6);
+    h.x+=h.vx; h.y+=h.vy;
+    if(h.x<16){h.x=16;h.vx=0;}
+    if(h.x>S.world-16){h.x=S.world-16;h.vx=0;}
+    if(h.y<34){h.y=34;h.vy=0;}
+    const g=gy(h.x);
+    if(h.y>=g && isWater(h.x)){
+      burst(h.x,g,30,[C.white,C.cyan,C.lblue],2.5,40); sfx('thud');
+      h.inv=0; h.hp=0; destroyHeli(); return;
+    }
+    if(h.y>=g){
+      if(Math.abs(h.vx)>1.1){ h.y=g-1; h.vy=-0.9; h.vx*=0.5; sfx('thud'); burst(h.x,g,6,[C.orange,C.brown],1,20); }
+      else{
+        h.y=g; h.ground=true; h.vx=0; h.vy=0;
+        for(const p of S.people) if((p.state==='wander'||p.state==='run'||p.state==='wait') && Math.abs(p.x-h.x)<11) killPerson(p);
+      }
+    }
+  }
+  if(h.inv>0) h.inv--;
+  if(h.cool>0) h.cool--;
+  if(h.bcool>0) h.bcool--;
+  if(keys.fire && !dry && h.cool<=0){
+    S.bullets.push({x:h.x+h.face*14,y:h.y-5,vx:h.face*5+h.vx,life:50});
+    h.cool=10; sfx('shot'); noteAttack(h);
+  }
+  if(keys.bomb && !dry && h.bcool<=0 && !h.ground){
+    S.bombs.push({x:h.x,y:h.y,vx:h.vx*0.8,vy:0.4});
+    h.bcool=32; sfx('bomb'); noteAttack(h);
+  }
+  if(h.hp===1 && !S.M.oneHit && S.t%5===0) S.parts.push({x:h.x-h.face*6,y:h.y-10,vx:rnd(-0.2,0.2),vy:-0.4,life:30,col:C.grey,s:2});
+  if(h.ground) groundActions(h);
+  if((S.M.kind==='rescue'||S.M.kind==='evac') && h.pass>=S.cap && !S.fullWarned){ S.fullWarned=true; say('Elicottero pieno: torna alla base',160); }
+}
+
+function noteAttack(h){
+  if(S.tanks.some(t=>Math.hypot(h.x-t.x,h.y-(gy(t.x)-6))<100)){
+    if(S.sieging) say('Bombardamento interrotto',100);
+    S.calmT=0; S.sieging=false;
+  }
+}
+function siegeShot(){
+  let b=null, tx, ty;
+  const full=S.bunkers.filter(q=>q.inside>0);
+  const dist=x=>Math.min(...S.tanks.map(t=>Math.abs(t.x-x)));
+  if(full.length){
+    b=full.reduce((a,q)=>dist(q.x+q.w/2)<dist(a.x+a.w/2)?q:a);
+    tx=b.x+b.w/2; ty=GROUND-b.h+6;
+  }else{
+    const ps=S.people.filter(p=>(p.state==='wander'||p.state==='wait') && !p.palace);
+    if(!ps.length) return;
+    const p=ps[(Math.random()*ps.length)|0]; tx=p.x; ty=gy(p.x)-2;
+  }
+  const t=S.tanks.reduce((a,q)=>Math.abs(q.x-tx)<Math.abs(a.x-tx)?q:a);
+  t.dir=Math.sign(tx-t.x)||t.dir;
+  const sx=t.x+t.dir*9, sy=gy(t.x)-11, g=0.05, dx=tx-sx;
+  const T=Math.max(30,Math.abs(dx)/2.5), vx=dx/T, vy=(ty-sy-0.5*g*T*T)/T;
+  S.shells.push({x:sx,y:sy,vx,vy,g,life:T+60,kind:'siege',target:b});
+  t.fire=8; sfx('tank');
+}
+function groundActions(h){
+  const M=S.M;
+  if(M.kind==='dogfight'){
+    if(onCarrier(h.x) && !S.planes.every(p=>p.dead) && !S.warnedLand){ S.warnedLand=true; say('Prima abbatti tutti gli aerei',120); }
+    return;
+  }
+  if(M.kind==='evac'){
+    if(onCarrier(h.x) && h.pass>0 && --S.unloadT<=0){
+      h.pass--;
+      const p=newPerson(h.x+4,h.x,'toBase','sold'); p.dest=S.door; S.people.push(p);
+      S.unloadT=10;
+      if(h.pass===0) S.fullWarned=false;
+    }
+    return;
+  }
+  if(M.kind==='rescue'){
+    if(h.x>=M.baseX && h.pass>0 && --S.unloadT<=0){
+      h.pass--;
+      const vip=!!h.vipAboard; h.vipAboard=false;
+      const p=newPerson(h.x+4,h.x,'toBase',vip?'pres':pickLook(M)); p.vip=vip; p.dest=S.door; S.people.push(p);
+      S.unloadT=10;
+      if(h.pass===0) S.fullWarned=false;
+    }
+    return;
+  }
+  if(h.x<300){
+    if(h.pass>0){
+      if(--S.unloadT<=0){
+        h.pass--;
+        const p=newPerson(h.x-4,h.x,'toBase','off'); p.dest=S.door; S.people.push(p);
+        S.unloadT=10;
+        if(h.pass===0 && S.delivered){
+          S.delivered=false; S.trips++;
+          sfx('fanfare');
+          say('Viaggio completato: '+S.trips+' su '+M.trips,160);
+        }
+      }
+    }else if(!h.cargo && !S.delivered){
+      h.loadT++;
+      if(h.loadT>=70){
+        h.cargo=1; h.loadT=0; sfx('board'); say('Rifornimenti a bordo: vola a Berlino',150);
+        if(M.tripSpawn && !S.spawnedTrips[S.trips]){ S.spawnedTrips[S.trips]=true; spawnTripEnemies(); }
+        else if(M.refill && S.trips>0 && !S.spawnedTrips[S.trips]){ S.spawnedTrips[S.trips]=true; refillEnemies(); }
+      }
+    }
+  }else if(h.x>S.world-310 && h.cargo){
+    h.loadT++;
+    if(h.loadT>=60){
+      h.cargo=0; h.loadT=0; S.crates++; S.delivered=true; sfx('saved');
+      const d=S.world-160;
+      for(let i=0;i<M.officers;i++){ const p=newPerson(d+rnd(-2,2),d-14+rnd(-6,6),'wait','off'); p.t=20+i*12; S.people.push(p); }
+      say('Consegnati! Imbarca gli ufficiali',150);
+    }
+  }
+}
+
+function refillEnemies(){
+  const M=S.M;
+  while(S.tanks.length<M.tanks) S.tanks.push(newTank(Math.round(rnd(700,S.world-700))));
+  for(const p of S.planes) if(p.dead){ p.dead=false; p.flying=false; p.wait=rnd(240,400); }
+  say('Il nemico ha rinforzato il corridoio',160);
+}
+function spawnTripEnemies(){
+  const T=S.M.tripSpawn;
+  for(let i=0;i<T.tanks;i++) S.tanks.push(newTank(Math.round(rnd(700,S.world-700))));
+  for(let i=0;i<T.jets;i++) S.planes.push({dead:false,flying:false,wait:240+i*200,x:0,y:0,vx:0,dir:1,fired:0,burst:0,bt:0,ft:0,red:false,jet:false,respawn:false});
+  say('In volo! Arrivano '+T.tanks+' carri e '+T.jets+' aereo',160);
+}
+function boardZone(h){
+  const k=S.M.kind;
+  if(k==='dogfight') return false;
+  if(k==='evac') return h.x<300;
+  return k==='airlift'?(h.x>S.world-310 && !h.cargo):(h.x<S.M.baseX);
+}
+
+function update(){
+  S.t++;
+  if(S.msgT>0) S.msgT--;
+  if(S.mode!=='play'){
+    if(S.mode==='intro'){ S.introT++; if(S.introT>600) beginPlay(); }
+    if(S.mode==='over'||S.mode==='win'||S.mode==='clear'||S.mode==='retry') S.overT++;
+    if(S.mode==='roll') updRoll();
+    updParts();
+    return;
+  }
+  const h=S.heli, M=S.M;
+  // Ufficiale ucciso: l'elicottero viene perso dopo 10 secondi
+  if(S.officerPenalty>0){
+    S.officerPenalty--;
+    if(!h.alive) S.officerPenalty=0;
+    else if(S.officerPenalty===0){ h.inv=0; destroyHeli(); }
+    else if(S.officerPenalty%60===0) say('Ufficiale ucciso! Abbattuto tra '+(S.officerPenalty/60),70);
+  }
+  if(h.alive) updHeli(h);
+  else if(S.respawn>0 && --S.respawn===0){
+    if(S.lives>0){ spawnHeli(); say('Nuovo elicottero pronto',110); }
+  }
+
+  // Berlino: missioni a tempo
+  if(M.timer && M.kind==='airlift'){
+    S.timeLeft--;
+    if(!S.minuteWarned && S.timeLeft<=3600){ S.minuteWarned=true; say('Manca un minuto!',150); sfx('rumble'); }
+    if(S.timeLeft<=0){ S.timeLeft=0; endLevel(false,'time'); return; }
+  }
+  // Vesuvio: timer e lava
+  if(M.terrain==='vesuvio'){
+    if(!S.erupted){
+      S.timeLeft--;
+      S.lavaX+=0.06;
+      if(!S.minuteWarned && S.timeLeft<=1800){ S.minuteWarned=true; say('30 secondi all\u2019eruzione!',150); sfx('rumble'); }
+      if(S.timeLeft<=0){
+        S.timeLeft=0; S.erupted=true; sfx('rumble'); sfx('boom');
+        burst(45,gy(45)-4,80,FIRE,4,90);
+        for(const p of S.people) if(p.state==='wander'||p.state==='run') killPerson(p);
+        say('Il Vesuvio erutta: campi perduti',220);
+      }
+    }else S.lavaX+=0.25;
+    if(S.t%3===0){
+      const n=S.erupted?3:1;
+      for(let i=0;i<n;i++) S.parts.push({x:45+rnd(-10,10),y:gy(45)-4,vx:rnd(-1,1.5),vy:rnd(-3.5,-1.5)*(S.erupted?1.4:0.6),life:rnd(30,60),col:Math.random()<0.5?C.lava1:C.lava2,s:Math.random()<0.4?2:1});
+    }
+    for(const p of S.people) if((p.state==='wander'||p.state==='run') && p.x<S.lavaX) killPerson(p);
+    if(h.alive && h.ground && h.x<S.lavaX+6) hurtHeli(1);
+  }
+
+  // Rifugi
+  for(const b of S.bunkers){
+    if(b.open && b.inside>0 && --b.releaseT<=0){
+      b.inside--;
+      const cx=b.x+b.w/2;
+      S.people.push(newPerson(cx+rnd(-3,3),cx+rnd(-20,20),'wander',pickLook(M)));
+      b.releaseT=14;
+    }
+  }
+
+  // Ritiro: i soldati escono dalla base a gruppi
+  if(M.kind==='evac'){
+    const waiting=S.people.filter(p=>p.state==='wait'||p.state==='run').length;
+    if(S.queue>0 && waiting<16 && S.t%8===0){ S.queue--; const p=newPerson(60,rnd(80,120),'wait','sold'); S.people.push(p); }
+  }
+  // Carri che tornano in campo
+  for(let i=S.tankRespawns.length-1;i>=0;i--){
+    if(--S.tankRespawns[i]<=0){
+      S.tankRespawns.splice(i,1);
+      const [lo,hi]=tankRange();
+      let x=S.camX>100?S.camX-40:S.camX+W+40;
+      if(x>hi-110) x=S.camX-40;
+      const t=newTank(clamp(x,lo+10,hi-110)); t.respawn=true; S.tanks.push(t);
+      say('Un carro nemico torna in campo',90);
+    }
+  }
+  // Persone
+  for(const p of S.people){
+    p.anim++;
+    if(p.state==='wander'||p.state==='wait'){
+      if(h.alive && h.ground && h.pass<S.cap && boardZone(h) && Math.abs(h.x-p.x)<160){ p.prev=p.state; p.state='run'; }
+      else{
+        const amp=p.state==='wait'?10:45;
+        if(--p.t<=0){ p.vx=Math.random()<0.4?0:rnd(-0.4,0.4); p.t=rnd(40,120); }
+        if(Math.abs(p.x-p.home)>amp) p.vx=Math.sign(p.home-p.x)*0.3;
+        p.x+=p.vx;
+      }
+    }else if(p.state==='run'){
+      if(!(h.alive && h.ground && h.pass<S.cap && boardZone(h))){
+        p.state=p.prev||'wander'; if(p.state==='wander') p.home=p.x; p.t=30;
+      }else{
+        const dx=h.x-p.x;
+        p.vx=Math.sign(dx)*0.8; p.x+=p.vx;
+        if(Math.abs(dx)<3){ h.pass++; if(p.vip) h.vipAboard=true; p.state='gone'; sfx('board'); }
+      }
+    }else if(p.state==='toBase'){
+      const dx=p.dest-p.x;
+      p.vx=Math.sign(dx)*0.6; p.x+=p.vx;
+      if(Math.abs(dx)<1){
+        p.state='gone'; S.saved+=p.vip?9:1; sfx('saved');
+        if(p.vip){ say('Il presidente è in salvo!',160); sfx('fanfare'); }
+      }
+    }
+  }
+
+  // Rinforzi sempre in campo: gestiti da killTank, tornano dopo 15 secondi
+
+  // Carri armati
+  const [tlo,thi]=tankRange();
+  for(const t of S.tanks){
+    const near=h.alive && !safe(h.x) && Math.abs(h.x-t.x)<230;
+    const target=near?h.x:t.post+Math.sin((S.t+t.post)*0.008)*40;
+    const dx=target-t.x;
+    if(Math.abs(dx)>(near?30:3)){ t.dir=Math.sign(dx); t.x+=t.dir*(near?0.4:0.25); t.anim++; }
+    else if(near) t.dir=Math.sign(h.x-t.x)||t.dir;
+    t.x=clamp(t.x,tlo,thi);
+    t.cool--;
+    if(near && Math.abs(h.x-t.x)<170 && t.cool<=0){
+      const sx=t.x+t.dir*9, sy=gy(t.x)-11;
+      const ddx=h.x-sx, ddy=(h.y-6)-sy, d=Math.max(1,Math.hypot(ddx,ddy)), sp=2.2, g=0.02;
+      S.shells.push({x:sx,y:sy,vx:ddx/d*sp,vy:ddy/d*sp-g*(d/sp)/2,g,life:160,kind:'shell'});
+      t.cool=rnd(100,160)-Math.min(60,DIFF()*6); t.fire=8;
+      sfx('tank');
+    }
+    if(t.fire>0) t.fire--;
+    for(const p of S.people) if((p.state==='wander'||p.state==='run'||p.state==='wait') && Math.abs(p.x-t.x)<9) killPerson(p);
+  }
+
+  // Se l'elicottero non attacca i carri per un minuto, i carri bombardano i rifugi
+  if(M.kind==='rescue' && S.tanks.length>0 && S.bunkers.length>0){
+    S.calmT++;
+    if(S.calmT>=CALM_T){
+      if(!S.sieging){ S.sieging=true; S.siegeT=60; say('I carri bombardano i rifugi!',150); }
+      if(--S.siegeT<=0){ S.siegeT=SIEGE_EVERY; siegeShot(); }
+    }
+  }
+
+  // Aerei a elica
+  if(S.t>(M.kind==='dogfight'?120:480)){
+    for(const p of S.planes){
+      if(p.dead) continue;
+      if(!p.flying){
+        if(--p.wait<=0 && h.alive){
+          p.flying=true; p.dir=Math.random()<0.5?1:-1;
+          p.x=p.dir>0?S.camX-40:S.camX+W+40; p.y=rnd(44,110); p.vx=p.dir*(p.jet?3.4:2.8); p.fired=0; p.burst=0; p.ft=0;
+          sfx('plane');
+        }
+        continue;
+      }
+      p.x+=p.vx;
+      if(M.homing && h.alive) p.y=clamp(p.y+clamp((h.y-6-p.y)*0.02,-0.7,0.7),40,150);
+      if(h.alive){
+        const dx=h.x-p.x, dy=h.y-6-p.y;
+        if(p.ft>0) p.ft--;
+        if(p.fired<(M.bursts||1) && p.burst===0 && p.ft<=0 && !safe(h.x) && Math.sign(dx)===p.dir && Math.abs(dx)<170 && Math.abs(dx)>40){ p.fired++; p.burst=3; p.bt=0; p.ft=25; }
+        if(p.burst>0 && --p.bt<=0){
+          const d=Math.max(1,Math.hypot(dx,dy)), sp=4;
+          S.shells.push({x:p.x+p.dir*10,y:p.y,vx:dx/d*sp,vy:dy/d*sp,g:0,life:90,kind:'mg',fatal:p.red&&!!M.redFatal});
+          p.burst--; p.bt=6; sfx('mg');
+        }
+        if(Math.abs(dx)<14 && Math.abs(dy)<7){ killPlane(p); hurtHeli(3); }
+      }
+      if((p.dir>0 && p.x>S.camX+W+220)||(p.dir<0 && p.x<S.camX-220)){ p.flying=false; p.wait=rnd(320,540)-Math.min(220,DIFF()*15); }
+    }
+  }
+
+  // Proiettili
+  for(const b of S.bullets){
+    b.x+=b.vx; b.life--;
+    if(b.life>0 && b.y>=gy(b.x)){ b.life=0; burst(b.x,b.y,3,[C.orange,C.brown],0.8,10); continue; }
+    for(const br of S.bunkers){
+      if(!br.open && b.life>0 && b.y>GROUND-br.h && b.x>br.x && b.x<br.x+br.w){
+        b.life=0; br.hp--; burst(b.x,b.y,4,[C.white,C.lgrey],1,12); sfx('small');
+        if(br.hp<=0) openBunker(br);
+      }
+    }
+    for(const t of S.tanks){
+      if(!t.dead && b.life>0 && b.y>gy(t.x)-11 && Math.abs(b.x-t.x)<10){
+        b.life=0; t.hp--; burst(b.x,b.y,4,[C.white,C.lava2],1,12); sfx('small');
+        if(t.hp<=0) killTank(t);
+      }
+    }
+    for(const p of S.planes) if(p.flying && !p.dead && b.life>0 && Math.abs(b.x-p.x)<11 && Math.abs(b.y-p.y)<4){ b.life=0; killPlane(p); }
+    for(const p of S.people) if(b.life>0 && ONGROUND[p.state] && b.y>gy(p.x)-8 && Math.abs(b.x-p.x)<2){ b.life=0; killPerson(p); }
+  }
+
+  // Bombe
+  for(const b of S.bombs){
+    b.vy+=0.1; b.x+=b.vx; b.y+=b.vy;
+    if(b.y>=gy(b.x)){
+      b.done=true;
+      burst(b.x,b.y-2,28,FIRE,2.2,38); sfx('boom');
+      for(const t of S.tanks) if(Math.abs(t.x-b.x)<18) killTank(t);
+      for(const p of S.people) if(ONGROUND[p.state] && Math.abs(p.x-b.x)<12) killPerson(p);
+      for(const br of S.bunkers) if(!br.open && b.x>br.x-6 && b.x<br.x+br.w+6) openBunker(br);
+    }
+  }
+
+  // Colpi nemici
+  for(const s of S.shells){
+    s.vy+=s.g; s.x+=s.vx; s.y+=s.vy; s.life--;
+    if(s.kind==='siege' && s.target && s.life>0){
+      const b=s.target;
+      if(s.x>b.x && s.x<b.x+b.w && s.y>=GROUND-b.h){
+        s.life=0; burst(s.x,s.y,24,FIRE,2,35); sfx('boom');
+        const k=Math.min(2,b.inside);
+        if(k>0){ b.inside-=k; S.dead+=k; say('Rifugio colpito: '+k+' persi',120); }
+      }
+    }
+    if(h.alive && h.inv<=0 && Math.abs(s.x-h.x)<11 && s.y>h.y-12 && s.y<h.y+1){ s.life=0; hurtHeli(s.fatal?3:1); }
+    if(s.life>0 && s.y>=gy(s.x)){
+      s.life=0; burst(s.x,s.y-1,8,FIRE,1.3,20); sfx('small');
+      for(const p of S.people) if((p.state==='wander'||p.state==='run'||p.state==='wait') && Math.abs(p.x-s.x)<6) killPerson(p);
+    }
+  }
+
+  updParts();
+  S.bullets=S.bullets.filter(b=>b.life>0);
+  S.bombs=S.bombs.filter(b=>!b.done);
+  S.shells=S.shells.filter(s=>s.life>0 && s.x>-50 && s.x<S.world+50 && s.y>-600);
+  S.tanks=S.tanks.filter(t=>!t.dead);
+  S.people=S.people.filter(p=>p.state!=='gone' && p.state!=='dead');
+
+  if(h.alive){ const target=h.x-W/2+h.face*40; S.camX+=(target-S.camX)*0.08; }
+  S.camX=clamp(S.camX,0,S.world-W);
+
+  // Fine missione
+  const noMoreHelis=!h.alive && S.lives<=0 && S.respawn===0;
+  if(noMoreHelis){ endLevel(false); return; }
+  if(M.kind==='dogfight'){
+    if(S.planes.every(p=>p.dead) && h.alive && h.ground && onCarrier(h.x)) endLevel(true);
+  }else if(M.kind==='airlift'){
+    if(S.trips>=M.trips && S.people.every(p=>p.state!=='toBase')) endLevel(true);
+  }else{
+    if(S.presidentDead){ endLevel(false,'president'); return; }
+    const inside=S.bunkers.reduce((a,b)=>a+b.inside,0);
+    const remaining=inside+S.queue+S.people.length+(h.alive?h.pass:0);
+    if(remaining===0){
+      if(M.palace && !S.palaceCalled){ S.palaceCalled=true; spawnPalace(); }
+      else endLevel(true);
+    }
+  }
+}
+function spawnPalace(){
+  const d=PALACE_DOOR;
+  const p=newPerson(d,d+24,'wait','pres'); p.vip=true; p.palace=true; S.people.push(p);
+  for(let i=0;i<3;i++){ const q=newPerson(d+rnd(-2,2),d+18+i*5,'wait','sold'); q.palace=true; q.t=10+i*10; S.people.push(q); }
+  say('Ultimo volo: il presidente al palazzo',220); sfx('open');
+}
+function updParts(){
+  for(const p of S.parts){
+    p.vy+=0.06; p.x+=p.vx; p.y+=p.vy; p.life--;
+    const g=gy(p.x)+2;
+    if(p.y>g){ p.y=g; p.vy*=-0.3; p.vx*=0.7; }
+  }
+  S.parts=S.parts.filter(p=>p.life>0);
+}
+function saveBest(){
+  if(S.totSaved>best){ best=S.totSaved; S.newBest=true; try{ localStorage.setItem('elicottero1944-best',String(best)); }catch(e){} }
+}
+function commitLevel(){
+  S.totSaved+=S.saved; S.totDead+=S.dead;
+  S.totAll+=S.M.kind==='airlift'?S.saved+S.dead:S.total;
+}
+function canRetry(){ return !S.retried[S.level] && S.retriesUsed<2; }
+function passLevel(){
+  commitLevel(); S.overT=0;
+  if(S.level>=MISSIONS.length-1){ S.mode='win'; saveBest(); sfx('fanfare'); return; }
+  S.mode='clear';
+  { const before=S.lives; S.lives=Math.min(MAX_LIVES,S.lives+(S.M.bonusLives||1)); S.bonus=S.lives-before; }
+  sfx('fanfare');
+}
+function endLevel(ok,reason){
+  S.overT=0; S.rollT=0;
+  S.pct=S.total?S.saved/S.total:0;
+  if(!ok){ S.failReason=reason||'down'; failLevel(); return; }
+  if(S.M.kind==='airlift'||S.M.kind==='dogfight'){ S.failReason=''; passLevel(); return; }
+  S.failReason='roll';
+  S.rollTarget=Math.random()*0.999;
+  S.passed=S.pct>0 && S.rollTarget<S.pct;
+  S.mode='roll';
+}
+function updRoll(){
+  S.rollT++;
+  if(S.rollT<=110 && S.rollT%6===0) sfx('tick');
+  if(S.rollT===130){ if(S.passed) passLevel(); else failLevel(); }
+}
+function rollPos(){
+  if(S.rollT>=110) return S.rollTarget;
+  const k=1-S.rollT/110;
+  return clamp(S.rollTarget+k*k*Math.sin(S.rollT*0.35)*0.6,0,1);
+}
+function failLevel(){
+  S.overT=0;
+  if(canRetry()){ S.mode='retry'; sfx('ouch'); }
+  else{ commitLevel(); S.mode='over'; saveBest(); sfx('ouch'); }
+}
+
+// ---------- Paesaggi ----------
+function cols(par,fn){
+  const off=S.camX*par, start=Math.floor(off/4), shift=off-start*4;
+  for(let k=0;k<=W/4+1;k++) fn(start+k,k*4-shift);
+}
+function pine(cx,base,th,col){
+  for(let k=0;k<th;k+=2){ const w=1+Math.floor(k*0.6); R(cx-Math.floor(w/2),base-th+k,w,2,col); }
+  R(cx,base-1,1,2,C.dgrey);
+}
+function hut(sx,base){
+  R(sx+1,base-5,10,5,C.white);
+  R(sx+4,base-4,3,4,C.brown);
+  R(sx-1,base-8,14,3,C.dgrey);
+  R(sx-2,base-9,1,1,C.dgrey); R(sx+13,base-9,1,1,C.dgrey);
+}
+function river(col,shine){
+  R(0,GROUND-10,W,10,col);
+  for(let i=0;i<10;i++){
+    const x=mod(i*41-S.camX*0.5+S.t*0.15,W);
+    R(x,GROUND-8+(i%4)*2,6,1,shine);
+  }
+}
+const ridge=i=>Math.round(30+18*Math.abs(Math.sin(i*0.07))+10*Math.abs(Math.sin(i*0.19+1))+3*Math.sin(i*0.6));
+function koreaMountains(col,tree){
+  cols(0.25,(i,sx)=>{
+    const h=ridge(i);
+    R(sx,GROUND-h,4,h,col);
+    if(tree && hsh(i)%3===0) R(sx+1,GROUND-h+2,2,2,tree);
+  });
+}
+function paddies(){
+  cols(0.5,(i,sx)=>{
+    R(sx,GROUND-4,4,4,C.lblue);
+    if(mod(i,6)===0) R(sx,GROUND-5,4,5,C.orange);
+    else if(i%2) R(sx+1,GROUND-6,1,2,C.lgreen);
+    if(mod(i,10)===3 && hsh(Math.floor(i/10))%3===0) hut(sx,GROUND-5);
+  });
+}
+function ruins(col,win){
+  cols(0.25,(i,sx)=>{
+    const b=Math.floor(i/3), v=hsh(b);
+    if(v%4===0) return;
+    const h=12+v%30, jag=(hsh(i)%3)*3;
+    R(sx,GROUND-h+jag,4,h-jag,col);
+    if(v%2) for(let y=GROUND-h+jag+3;y<GROUND-6;y+=6) R(sx+1,y,2,2,win);
+  });
+}
+function transports(col){
+  for(let k=0;k<2;k++){
+    const x=mod(S.t*0.4+k*190,W+80)-40, y=34+k*14;
+    R(x,y,14,2,col); R(x+5,y-1,4,4,col); R(x,y-3,2,3,col); R(x+13,y,2,1,col);
+  }
+}
+function gate(sx){
+  R(sx-12,GROUND-12,28,12,C.lgrey);
+  R(sx-2,GROUND-9,8,9,C.black);
+  R(sx-9,GROUND-18,22,6,C.red);
+  R(sx-15,GROUND-21,34,3,C.dgrey); R(sx-16,GROUND-22,1,1,C.dgrey); R(sx+19,GROUND-22,1,1,C.dgrey);
+  R(sx-6,GROUND-26,16,5,C.red);
+  R(sx-11,GROUND-29,26,3,C.dgrey); R(sx-12,GROUND-30,1,1,C.dgrey); R(sx+15,GROUND-30,1,1,C.dgrey);
+}
+function smokeCol(sx,base,col){
+  const f=(S.t>>3)%6;
+  for(let k=0;k<5;k++) R(sx+(k%2)-k,base-6-k*6-f,3+k,3,col);
+}
+
+function palm(sx,base,h,trunk,leaf){
+  for(let k=0;k<h;k++) R(sx+Math.round(Math.sin(k*0.12)*2),base-k,2,1,trunk);
+  const tx=sx+Math.round(Math.sin(h*0.12)*2), ty=base-h;
+  R(tx-6,ty,6,1,leaf); R(tx+2,ty,6,1,leaf);
+  R(tx-8,ty+1,2,1,leaf); R(tx+8,ty+1,2,1,leaf);
+  R(tx-9,ty+2,1,2,leaf); R(tx+10,ty+2,1,2,leaf);
+  R(tx-4,ty-1,3,1,leaf); R(tx+3,ty-1,3,1,leaf); R(tx,ty-2,2,2,leaf);
+}
+function seaBand(col,shine){
+  R(0,150,W,34,col);
+  for(let i=0;i<14;i++) R(mod(i*29-S.camX*0.1+S.t*0.05,W),153+(i%6)*5,5,1,shine);
+}
+function jungle(col,hi){
+  cols(0.5,(i,sx)=>{
+    const h=Math.round(12+5*Math.sin(i*0.3)+4*Math.sin(i*0.9)+(hsh(i)%4));
+    R(sx,GROUND-h,4,h,col);
+    if(hsh(i)%3===0) R(sx+1,GROUND-h,2,1,hi);
+  });
+}
+function coastHills(col){
+  cols(0.25,(i,sx)=>{
+    if(i*16>1100) return;
+    const h=Math.round(14+8*Math.abs(Math.sin(i*0.13)));
+    R(sx,150-h,4,h,col);
+  });
+}
+const THEMES={
+  vesuvio:{sky:[C.lblue,C.lgrey,C.cyan], cloud:C.lgrey,
+    groundCol:(x,y)=>y<128?[C.dgrey,C.grey]:(x>=1400?[C.khaki,C.white]:[C.green,C.lgreen]),
+    far:()=>{
+      R(0,150,W,30,C.lblue);
+      for(let i=0;i<12;i++) R(mod(i*29-S.camX*0.1+S.t*0.05,W),154+(i%5)*5,5,1,C.cyan);
+      cols(0.12,(i,sx)=>{ const m=mod(i,90); if(m<22){ const h=Math.round(12*Math.sin(Math.PI*m/22)); R(sx,150-h,4,h,C.purple);} });
+    },
+    over:()=>{
+      const prog=1-S.timeLeft/(S.M.timer*60);
+      const ash=Math.round(4+40*prog+(S.erupted?20:0));
+      R(0,12,W,ash,C.dgrey);
+      for(let x=0;x<W;x+=2) R(x+((x>>1)%2),12+ash,1,1,C.dgrey);
+      const cx=45-S.camX, top=gy(45);
+      if(cx>-80 && cx<W+20){
+        const f=(S.t>>2)%8;
+        for(let k=0;k<16;k++){
+          const px=cx+k*3+Math.sin(S.t*0.04+k)*3, py=top-8-k*5-f*0.6, sz=4+k;
+          R(px-sz/2,py,sz,4,k%2?C.grey:C.dgrey);
+        }
+      }
+      for(let k=0;k<30;k++){
+        const x=mod(k*71+S.t*0.5,W), y=12+mod(k*37+S.t*(0.6+(k%3)*0.2),170);
+        R(x,y,1,1,C.lgrey);
+      }
+    }
+  },
+  berlino:{sky:[C.blue,C.lblue,C.lgrey], cloud:C.white, groundCol:()=>[C.green,C.lgreen],
+    far:()=>{ ruins(C.grey,C.dgrey); transports(C.dgrey); },
+    near:()=>cols(0.5,(i,sx)=>{
+      R(sx,GROUND-3,4,3,C.green);
+      if(hsh(i)%5===0){ R(sx+1,GROUND-16,3,13,C.green); R(sx+2,GROUND-3,1,3,C.brown); }
+    })},
+  berlino2:{sky:[C.blue,C.purple,C.lred], cloud:C.lred, groundCol:()=>[C.green,C.lgreen],
+    far:()=>{ ruins(C.dgrey,C.black); transports(C.black); },
+    near:()=>cols(0.5,(i,sx)=>{
+      R(sx,GROUND-3,4,3,C.brown);
+      if(hsh(i)%5===0){ R(sx+1,GROUND-16,3,13,C.brown); }
+    })},
+  kaesong:{sky:[C.blue,C.purple,C.lred], cloud:C.lred, groundCol:()=>[C.orange,C.lava2],
+    far:()=>koreaMountains(C.dgrey,C.black), near:paddies},
+  uijeongbu:{sky:[C.blue,C.lblue,C.cyan], cloud:C.white, groundCol:()=>[C.orange,C.yellow],
+    far:()=>koreaMountains(C.purple,C.green),
+    near:()=>cols(0.5,(i,sx)=>{
+      const h=Math.round(9+4*Math.sin(i*0.2)+2*Math.sin(i*0.55));
+      R(sx,GROUND-h,4,h,C.green);
+      if(mod(i,11)===4 && hsh(Math.floor(i/11))%2===0) hut(sx,GROUND-h+2);
+      else if(hsh(i)%4===0) pine(sx+2,GROUND-h+1,9+hsh(i+5)%6,C.brown);
+    })},
+  munsan:{sky:[C.dgrey,C.grey,C.lgrey], cloud:C.dgrey, groundCol:()=>[C.brown,C.orange], rain:true,
+    far:()=>koreaMountains(C.dgrey,null), mid:()=>river(C.grey,C.lgrey), near:paddies},
+  seul:{sky:[C.dgrey,C.lblue,C.lgrey], cloud:C.grey, groundCol:()=>[C.orange,C.yellow],
+    far:()=>cols(0.25,(i,sx)=>{
+      const b=Math.floor(i/4), v=hsh(b), h=8+v%18;
+      R(sx,GROUND-h,4,h,C.grey);
+      if(v%3===0) R(sx,GROUND-h-2,4,2,C.dgrey);
+      if(mod(i,150)===70) gate(sx);
+      if(mod(i,47)===11) smokeCol(sx,GROUND-h,C.dgrey);
+    }),
+    near:()=>cols(0.5,(i,sx)=>{
+      if(hsh(Math.floor(i/5))%3===0){ const h=3+hsh(i)%5; R(sx,GROUND-h,4,h,C.dgrey); }
+    })},
+  han:{sky:[C.black,C.blue,C.purple], cloud:C.blue, groundCol:()=>[C.brown,C.orange],
+    far:()=>cols(0.2,(i,sx)=>{
+      const b=Math.floor(i/3), v=hsh(b), h=10+v%22;
+      R(sx,GROUND-h,4,h,C.dgrey);
+      if(v%2) for(let y=GROUND-h+3;y<GROUND-12;y+=5) if(hsh(i*11+y)%3===0) R(sx+1,y,1,1,C.lava2);
+      if(mod(i,61)===20) smokeCol(sx,GROUND-h,C.grey);
+    }),
+    mid:()=>{
+      river(C.blue,C.lblue);
+      cols(0.4,(i,sx)=>{
+        const m=mod(i,80);
+        if(mod(i,12)===0) R(sx,GROUND-14,3,14,C.grey);
+        if(m>=50 && m<58) return;
+        R(sx,GROUND-17,4,2,C.dgrey);
+        R(sx,GROUND-27,4,1,C.dgrey);
+        if(i%3===0) R(sx,GROUND-27,1,10,C.dgrey);
+        R(sx+(mod(i,3)),GROUND-26+mod(i,3)*3,1,3,C.dgrey);
+      });
+    },
+    near:()=>cols(0.5,(i,sx)=>{
+      const h=Math.round(5+3*Math.sin(i*0.2));
+      R(sx,GROUND-h,4,h,C.brown);
+      if(hsh(i)%13===0){ R(sx,GROUND-h-2,3,2,(S.t>>2)&1?C.lava2:C.lava1); smokeCol(sx,GROUND-h-2,C.dgrey); }
+    })},
+  baia:{sky:[C.blue,C.lblue,C.cyan], cloud:C.white, groundCol:()=>[C.green,C.lgreen],
+    far:()=>{ seaBand(C.lblue,C.cyan); coastHills(C.green); }},
+  gitmo:{sky:[C.blue,C.purple,C.lred], cloud:C.lred, groundCol:()=>[C.orange,C.khaki],
+    far:()=>{ seaBand(C.blue,C.lblue); coastHills(C.dgrey); }},
+  cuba:{sky:[C.blue,C.lblue,C.cyan], cloud:C.white, groundCol:()=>[C.lred,C.orange],
+    far:()=>koreaMountains(C.green,C.lgreen),
+    near:()=>cols(0.5,(i,sx)=>{
+      R(sx,GROUND-6,4,6,C.lgreen); if(i%2) R(sx+1,GROUND-8,1,2,C.lgreen); R(sx,GROUND-2,4,1,C.green);
+      if(mod(i,13)===5) palm(sx,GROUND-5,18+hsh(i)%8,C.orange,C.green);
+    })},
+  quangtri:{sky:[C.dgrey,C.lblue,C.cyan], cloud:C.lgrey, groundCol:()=>[C.red,C.lred],
+    far:()=>cols(0.25,(i,sx)=>{
+      const h=Math.round(34+10*Math.sin(i*0.09)+6*Math.sin(i*0.31)+3*Math.sin(i*0.9));
+      R(sx,GROUND-h,4,h,C.green); if(hsh(i)%3===0) R(sx+1,GROUND-h,2,2,C.lgreen);
+    }),
+    near:()=>jungle(C.brown,C.green)},
+  hue:{sky:[C.blue,C.lblue,C.lgrey], cloud:C.white, groundCol:()=>[C.orange,C.yellow],
+    far:()=>cols(0.25,(i,sx)=>{
+      R(sx,GROUND-18,4,18,C.lgrey); if(i%2===0) R(sx,GROUND-20,2,2,C.lgrey);
+      R(sx,GROUND-14,4,1,C.grey);
+      if(mod(i,90)===40){ R(sx-2,GROUND-40,8,22,C.grey); R(sx,GROUND-44,4,4,C.grey); }
+      if(mod(i,90)===70){ R(sx-10,GROUND-28,24,10,C.lgrey); R(sx-13,GROUND-31,30,3,C.red); R(sx-6,GROUND-36,16,5,C.lgrey); R(sx-9,GROUND-38,22,2,C.red); R(sx-1,GROUND-24,6,6,C.black); }
+    }),
+    mid:()=>river(C.lblue,C.cyan),
+    near:()=>cols(0.5,(i,sx)=>{ if(mod(i,11)===3) palm(sx,GROUND,16+hsh(i)%8,C.orange,C.green); })},
+  danang:{sky:[C.blue,C.cyan,C.white], cloud:C.white, groundCol:()=>[C.khaki,C.white],
+    far:()=>{
+      seaBand(C.lblue,C.cyan);
+      cols(0.2,(i,sx)=>{
+        const m=mod(i,70);
+        if(m<14){
+          const h=Math.round(46*Math.sin(Math.PI*m/14)*(0.6+0.4*(hsh(Math.floor(i/70))%100)/100));
+          R(sx,150-h,4,h,C.lgrey); if(hsh(i)%2) R(sx+1,150-h+4,2,2,C.green);
+        }
+      });
+    },
+    near:()=>cols(0.5,(i,sx)=>{ if(mod(i,9)===2) palm(sx,GROUND,18+hsh(i)%10,C.orange,C.green); })},
+  xuanloc:{sky:[C.dgrey,C.grey,C.lgrey], cloud:C.dgrey, groundCol:()=>[C.red,C.lred],
+    far:()=>cols(0.25,(i,sx)=>{ const h=Math.round(20+6*Math.sin(i*0.1)); R(sx,GROUND-h,4,h,C.dgrey); if(mod(i,37)===9) smokeCol(sx,GROUND-h,C.grey); }),
+    near:()=>cols(0.5,(i,sx)=>{
+      if(mod(i,3)===0){ R(sx+1,GROUND-14,1,14,C.dgrey); R(sx-2,GROUND-20,8,6,C.green); R(sx-1,GROUND-22,6,2,C.green); }
+    })},
+  saigon:{sky:[C.black,C.blue,C.purple], cloud:C.blue, groundCol:()=>[C.dgrey,C.grey],
+    far:()=>cols(0.25,(i,sx)=>{
+      const b=Math.floor(i/3), v=hsh(b), h=14+v%40;
+      R(sx,GROUND-h,4,h,C.dgrey);
+      for(let y=GROUND-h+3;y<GROUND-6;y+=5) if(hsh(i*7+y)%3===0) R(sx+1,y,2,1,C.lava2);
+      if(mod(i,53)===17) smokeCol(sx,GROUND-h,C.grey);
+    }),
+    near:()=>cols(0.5,(i,sx)=>{
+      if(mod(i,10)===4) palm(sx,GROUND,18+hsh(i)%8,C.black,C.black);
+      if(hsh(i)%17===0) R(sx,GROUND-3,3,3,(S.t>>2)&1?C.lava2:C.lava1);
+    })}
+};
+
+function drawBackground(){
+  const T=THEMES[S.M.theme];
+  R(0,12,W,58,T.sky[0]);
+  for(let y=70;y<100;y+=2) if(y>=86 || y%4===0) R(0,y,W,1,T.sky[1]);
+  R(0,100,W,40,T.sky[1]);
+  for(let y=140;y<154;y+=2) R(0,y,W,1,T.sky[2]);
+  R(0,154,W,GROUND-154,T.sky[2]);
+  for(let c=0;c<6;c++){
+    const span=W+80, sx=mod(c*170+40-S.camX*0.12,span)-40, y=24+(c*37)%44;
+    R(sx+4,y-3,12,3,T.cloud); R(sx,y,24,4,T.cloud);
+  }
+  T.far();
+  if(T.mid) T.mid();
+  if(T.near) T.near();
+  // Terreno
+  const ves=S.M.terrain==='vesuvio';
+  for(let sx=0;sx<W;sx+=2){
+    const wx=sx+S.camX, y=Math.round(gy(wx));
+    const [g,t]=S.M.terrain==='sea'?(
+      (wx>=CARRIER0&&wx<=CARRIER1)?[C.grey,C.dgrey]:
+      wx>=COAST+20?[C.lblue,C.cyan]:
+      wx>=COAST?[C.khaki,C.white]:T.groundCol(wx,y)):T.groundCol(wx,y);
+    R(sx,y,2,191-y,g);
+    R(sx,y,2,1,t);
+    if(ves && wx<S.lavaX){
+      const f=((wx>>1)+(S.t>>2))%3;
+      R(sx,y-1,2,3,f===0?C.lava2:C.lava1);
+      if(f===1) R(sx,y+2,2,1,C.red);
+    }
+  }
+  const s0=Math.floor(S.camX/23);
+  for(let i=s0;i<s0+16;i++){
+    const wx=i*23, sx=wx-S.camX;
+    R(sx,gy(wx)+3+((i*7)%6),2,1,C.brown);
+  }
+  if(T.over) T.over();
+}
+
+// ---------- Sprite ----------
+function usFlag(fx,base){
+  const wave=(S.t>>3)&1;
+  R(fx,base-46,1,46,C.white);
+  for(let r=0;r<6;r++) R(fx+1,base-46+r*2,13+(r>2?wave:0),2,r%2?C.white:C.flagRed);
+  R(fx+1,base-46,6,6,C.flagBlue);
+  R(fx+2,base-45,1,1,C.white); R(fx+4,base-43,1,1,C.white); R(fx+5,base-45,1,1,C.white);
+}
+function drawBases(){
+  const M=S.M;
+  if(M.kind==='rescue'){
+    if(M.palace) drawPalace();
+    const bx=Math.round(M.baseX-S.camX), base=gy(M.baseX);
+    if(bx>W+220) return;
+    for(let i=0;i<5;i++) R(bx-30+i*5,base-8,1,8,C.lgrey);
+    R(bx-30,base-7,21,1,C.lgrey); R(bx-30,base-4,21,1,C.lgrey);
+    for(let i=0;i<6;i++) R(bx-8+i*3,base-10,3,2,i%2?C.black:C.white);
+    R(bx,base,100,3,C.dgrey);
+    for(let i=0;i<10;i++) R(bx+3+i*10,base+1,5,1,C.white);
+    const hx=Math.round(S.door-35-S.camX);
+    R(hx,base-26,80,26,C.khaki);
+    R(hx-4,base-30,88,4,C.green); R(hx+4,base-33,72,3,C.green);
+    for(let i=0;i<3;i++) R(hx+6+i*10,base-18,6,4,C.dgrey);
+    R(hx+60,base-18,8,4,C.dgrey);
+    R(Math.round(S.door-S.camX)-4,base-13,9,13,C.black);
+    usFlag(hx+90,base);
+    return;
+  }
+  // Base in Germania Ovest
+  let x=Math.round(20-S.camX);
+  if(x>-120 && x<W+20){
+    R(x,GROUND-20,80,20,C.grey); R(x+4,GROUND-24,72,4,C.grey); R(x+12,GROUND-27,56,3,C.grey);
+    R(x+2,GROUND-20,76,1,C.lgrey);
+    R(x+30,GROUND-16,20,16,C.black);
+    R(x+110,GROUND,100,3,C.dgrey);
+    for(let i=0;i<10;i++) R(x+113+i*10,GROUND+1,5,1,C.white);
+    for(let i=0;i<5;i++) R(x+272+i*5,GROUND-8,1,8,C.lgrey);
+    R(x+272,GROUND-7,21,1,C.lgrey);
+    usFlag(x+92,GROUND);
+  }
+  if(M.terrain==='sea'){ drawCarrier(); drawPalms(); return; }
+  // Tempelhof
+  x=Math.round(S.world-300-S.camX);
+  if(x>-320 && x<W+20){
+    for(let i=0;i<5;i++) R(x-12+i*5,GROUND-8,1,8,C.lgrey);
+    R(x-12,GROUND-7,21,1,C.lgrey);
+    R(x,GROUND,100,3,C.dgrey);
+    for(let i=0;i<10;i++) R(x+3+i*10,GROUND+1,5,1,C.white);
+    const tx=x+120;
+    R(tx,GROUND-22,170,22,C.lgrey); R(tx-2,GROUND-24,174,2,C.grey);
+    for(let j=0;j<20;j++) R(tx+6+j*8,GROUND-16,4,4,C.dgrey);
+    R(tx+70,GROUND-34,24,12,C.lgrey); R(tx+76,GROUND-30,12,4,C.dgrey);
+    R(Math.round(S.world-160-S.camX)-4,GROUND-12,9,12,C.black);
+    usFlag(tx+82,GROUND-34);
+    const cx=x+104;
+    for(let k=0;k<Math.min(S.crates,12);k++){
+      const c=k%3, r=Math.floor(k/3);
+      R(cx+c*5,GROUND-4-r*4,4,4,C.orange); R(cx+c*5,GROUND-3-r*4,4,1,C.brown);
+    }
+  }
+}
+
+function drawPalms(){
+  for(const x of [340,440,540,640]){
+    const sx=Math.round(x-S.camX); if(sx<-20||sx>W+20) continue;
+    palm(sx,GROUND,22+hsh(x)%8,C.orange,C.green);
+  }
+}
+function drawCarrier(){
+  const x0=Math.round(CARRIER0-S.camX), w=CARRIER1-CARRIER0;
+  if(x0>W+20||x0+w<-20) return;
+  R(x0-10,160,10,3,C.grey); R(x0-6,163,6,4,C.grey);
+  R(x0,160,w,2,C.dgrey);
+  for(let i=0;i<w-10;i+=12) R(x0+4+i,160,6,1,C.white);
+  R(x0,180,w,2,C.red);
+  for(let k=0;k<3;k++){ const px=x0+30+k*26; R(px,156,12,2,C.lgrey); R(px+3,154,4,2,C.lgrey); R(px,153,2,3,C.lgrey); }
+  const ix=Math.round(CARRIER_DOOR-20-S.camX);
+  R(ix,128,40,32,C.grey); R(ix+4,132,32,4,C.cyan); R(ix+2,128,36,1,C.lgrey);
+  R(ix+18,112,2,16,C.dgrey); R(ix+12,116,14,1,C.dgrey);
+  R(Math.round(CARRIER_DOOR-S.camX)-4,148,9,12,C.black);
+  usFlag(ix+36,128);
+}
+const PALACE_X=30, PALACE_W=150, PALACE_DOOR=170;
+function drawPalace(){
+  const x=Math.round(PALACE_X-S.camX), b=GROUND;
+  if(x>W||x+PALACE_W+40<0) return;
+  R(x,b-34,PALACE_W,34,C.white);
+  for(let y=b-30;y<b-4;y+=9) R(x,y,PALACE_W,1,C.lgrey);
+  for(let i=2;i<PALACE_W;i+=4) R(x+i,b-30,1,26,C.lgrey);
+  for(let i=6;i<PALACE_W-10;i+=12) if(hsh(i)%2) R(x+i+1,b-26,2,4,C.lava2);
+  R(x-4,b-37,PALACE_W+8,3,C.lgrey);
+  R(x+40,b-45,70,8,C.white); R(x+38,b-47,74,2,C.lgrey);
+  for(let i=42;i<108;i+=4) R(x+i,b-44,1,6,C.lgrey);
+  R(x+PALACE_W,b-15,26,2,C.lgrey); R(x+PALACE_W+22,b-13,2,13,C.lgrey);
+  R(Math.round(PALACE_DOOR-S.camX)-4,b-12,9,12,C.black);
+  R(x-8,b-6,1,6,C.lgrey); R(x-8,b-6,6,1,C.lgrey);
+}
+const HOUSE={
+  hanok:{wall:C.white,beam:C.brown,roof:C.dgrey,win:C.yellow,door:C.orange},
+  casa:{wall:C.yellow,beam:C.lgrey,roof:C.lred,win:C.cyan,door:C.brown},
+  viet:{wall:C.orange,beam:C.brown,roof:C.khaki,win:C.dgrey,door:C.brown}
+};
+function drawBunker(b){
+  const x=Math.round(b.x-S.camX);
+  if(x>W||x+b.w<0) return;
+  const y=GROUND-b.h, st=HOUSE[S.M.house||'hanok'];
+  if(!b.open){
+    R(x,y+6,b.w,b.h-6,st.wall);
+    R(x,y+6,2,b.h-6,st.beam); R(x+b.w-2,y+6,2,b.h-6,st.beam); R(x+b.w/2-1,y+6,2,b.h-6,st.beam);
+    R(x-4,y+2,b.w+8,4,st.roof); R(x-6,y,3,2,st.roof); R(x+b.w+3,y,3,2,st.roof); R(x+2,y,b.w-4,2,st.roof);
+    R(x+6,y+10,8,6,st.win); R(x+9,y+10,1,6,st.beam); R(x+6,y+12,8,1,st.beam);
+    R(x+b.w-14,y+10,8,6,st.win); R(x+b.w-11,y+10,1,6,st.beam);
+    R(x+b.w/2-6,y+9,12,13,st.door);
+    R(x+b.w/2-6,y+12,12,1,C.black); R(x+b.w/2-6,y+17,12,1,C.black);
+    if(b.hp<=3) R(x+8,y+18,4,1,C.grey);
+    if(b.hp<=2) R(x+34,y+8,1,5,C.grey);
+    if(b.hp<=1) R(x+18,y+4,5,2,C.black);
+  }else{
+    for(let i=0;i<b.w;i+=4){ const top=y+8+((i*7)%7); R(x+i,top,4,GROUND-top,st.wall); }
+    R(x+b.w/2-6,y+12,12,10,C.black);
+    for(let i=0;i<6;i++) R(x-4+i*9,GROUND-2,4,2,C.dgrey);
+    if(b.inside>0 && (S.t>>4)%2) R(x+b.w/2-1,y+14,2,2,C.lred);
+  }
+}
+function drawCamps(){
+  for(const c of (S.M.camps||[])){
+    const x=Math.round(c.x-S.camX), base=Math.round(gy(c.x));
+    if(x<-60||x>W+60) continue;
+    for(const off of [-34,-8,20]){
+      for(let r=0;r<9;r++) R(x+off+8-r,base-9+r,2*r+1,1,r%3===0?C.white:C.lgrey);
+      R(x+off+7,base-4,3,4,C.dgrey);
+    }
+    R(x+48,base-14,1,14,C.brown); R(x+49,base-14,5,3,C.white);
+  }
+}
+
+function drawPerson(p){
+  const x=Math.round(p.x-S.camX), y=Math.round(gy(p.x));
+  if(x<-4||x>W+4) return;
+  const moving=p.state==='run'||p.state==='toBase'||Math.abs(p.vx)>0.05;
+  const leg=moving?((p.anim>>3)&1):0;
+  let head=C.lred, hat=C.brown, body=C.white, legs=C.dgrey;
+  const lk=p.look;
+  if(lk==='pres'){ hat=C.lgrey; body=C.black; legs=C.black; }
+  else if(lk==='off'){ hat=C.green; body=C.khaki; legs=C.khaki; }
+  else if(lk==='sold'){ hat=C.green; body=C.green; legs=C.brown; }
+  else if(lk==='kciv'){ hat=C.black; body=C.white; legs=C.white; }
+  else { body=[C.white,C.lred,C.cyan,C.yellow][+lk.slice(3)||0]; hat=C.black; }
+  R(x-1,y-9,lk==='sold'||lk==='off'?3:2,1,hat);
+  R(x-1,y-8,2,2,head);
+  R(x-1,y-6,2,4,body);
+  if(leg){ R(x-2,y-2,1,2,legs); R(x+1,y-2,1,2,legs); } else R(x-1,y-2,2,2,legs);
+  if(lk==='pres') R(x,y-6,1,2,C.white);
+  if(p.vip && (S.t>>3)&1) R(x-1,y-13,2,2,C.gold);
+  const h=S.heli;
+  if((p.state==='wander'||p.state==='wait') && h.alive && Math.abs(h.x-p.x)<120 && boardZone(h)){
+    if((p.anim>>4)&1) R(x+1,y-11,1,3,head); else R(x-2,y-11,1,3,head);
+  }
+}
+
+function drawTank(t){
+  const x=Math.round(t.x-S.camX), y=Math.round(gy(t.x));
+  if(x<-14||x>W+14) return;
+  R(x-10,y-3,20,3,C.black);
+  for(let i=0;i<5;i++) R(x-9+i*4+((t.anim>>2)&1),y-2,2,1,C.dgrey);
+  R(x-9,y-6,18,3,C.dgrey); R(x-7,y-7,14,1,C.dgrey);
+  R(x-4,y-10,8,3,C.grey); R(x-3,y-11,6,1,C.grey);
+  const lift=t.fire>0?1:0;
+  if(t.dir>0) R(x+4,y-10-lift,8,1,C.grey); else R(x-12,y-10-lift,8,1,C.grey);
+  if(t.fire>4) R(t.dir>0?x+12:x-14,y-11,2,2,C.lava2);
+}
+function drawPlane(p){
+  const x=Math.round(p.x-S.camX), y=Math.round(p.y);
+  if(x<-20||x>W+20) return;
+  const body=p.red?C.flagRed:C.grey, dark=p.red?C.red:C.dgrey;
+  ctx.save(); ctx.translate(x,y); ctx.scale(p.dir,1);
+  if(p.jet){
+    R(-10,-1,18,3,body); R(8,0,3,1,body);
+    R(-10,-5,3,4,dark); R(-3,1,7,2,dark); R(2,-2,4,1,C.cyan);
+    if(S.t&1) R(-13,0,3,1,C.lava2);
+  }else{
+    R(-9,-1,16,3,body); R(7,-1,2,3,dark);
+    if(S.t&1) R(9,-4,1,9,C.lgrey); else R(9,0,1,1,C.lgrey);
+    R(-3,1,7,1,dark); R(-2,2,5,1,dark);
+    R(-10,-4,2,3,dark); R(-10,0,4,1,dark);
+    R(1,-2,3,1,C.cyan);
+  }
+  ctx.restore();
+}
+function drawHeli(h){
+  if(!h.alive) return;
+  if(h.inv>0 && S.mode==='play' && (S.t>>2)%2) return;
+  const x=Math.round(h.x-S.camX), y=Math.round(h.y);
+  if(!h.ground){
+    const g=gy(h.x), alt=g-h.y, sw=Math.max(4,18-alt/8)|0;
+    R(x-sw/2,g+1,sw,1,isWater(h.x)?C.blue:C.dgrey);
+  }
+  ctx.save(); ctx.translate(x,y); ctx.scale(h.face,1);
+  if(S.M.heli==='huey'){
+    R(-10,-1,21,1,C.dgrey); R(-7,-3,1,2,C.dgrey); R(6,-3,1,2,C.dgrey); R(11,-2,1,1,C.dgrey);
+    R(-8,-10,16,7,C.green); R(-7,-11,13,1,C.green); R(8,-9,3,5,C.green);
+    R(5,-10,5,4,C.cyan); R(10,-8,1,2,C.cyan);
+    R(-5,-9,6,5,C.dgrey);
+    if(h.pass>0) R(-4,-8,1,2,C.lred);
+    if(h.pass>4) R(-2,-8,1,2,C.lred);
+    if(h.pass>9) R(0,-8,1,2,C.lred);
+    R(-5,-13,8,2,C.green);
+    if(h.cargo) R(-7,-6,4,2,C.orange);
+    R(-24,-9,16,2,C.green); R(-26,-14,3,7,C.green);
+    R(-18,-9,3,1,C.white); R(-17,-10,1,3,C.white);
+    if((S.t>>1)&1) R(-27,-15,1,7,C.white); else R(-29,-12,5,1,C.white);
+    R(-2,-15,2,2,C.dgrey);
+    const ws=[36,24,10,24], w=ws[(S.t>>1)%4];
+    R(-1-w/2,-16,w,1,C.white);
+  }else{
+    R(-6,-2,2,2,C.black); R(6,-2,2,2,C.black);
+    R(-5,-4,1,2,C.dgrey); R(7,-4,1,2,C.dgrey);
+    R(-7,-10,11,6,C.green); R(-6,-11,8,1,C.green);
+    R(4,-10,5,6,C.cyan); R(4,-11,3,1,C.cyan); R(9,-9,1,4,C.cyan); R(6,-9,1,2,C.white);
+    R(-5,-8,3,1,C.white); R(-4,-9,1,3,C.white);
+    if(h.cargo) R(-7,-6,4,2,C.orange);
+    R(-23,-9,16,2,C.green); R(-24,-12,2,5,C.green);
+    if((S.t>>1)&1) R(-25,-14,1,7,C.white); else R(-27,-11,5,1,C.white);
+    R(-2,-15,2,5,C.dgrey);
+    const ws=[30,20,8,20], w=ws[(S.t>>1)%4];
+    R(-1-w/2,-16,w,1,C.white);
+    if(h.pass>0) R(-1,-9,1,1,C.lred);
+    if(h.pass>2) R(1,-9,1,1,C.lred);
+  }
+  ctx.restore();
+  if(h.ground && h.loadT>0){
+    const lim=S.M.kind==='airlift'&&h.x<300?70:60;
+    R(x-8,y-22,16,2,C.dgrey); R(x-8,y-22,Math.round(16*h.loadT/lim),2,C.lgreen);
+  }
+  if(h.ground && h.repT>0 && h.hp<3 && !S.M.noRepair){
+    R(x-8,y-26,16,2,C.dgrey); R(x-8,y-26,Math.round(16*h.repT/REPAIR_T),2,C.yellow);
+  }
+}
+
+// ---------- Interfaccia ----------
+function txt(s,x,y,col,size,align){
+  ctx.font=(size||8)+'px '+FONT; ctx.textAlign=align||'left'; ctx.textBaseline='top';
+  ctx.fillStyle=C.black; ctx.fillText(s,Math.round(x)+1,Math.round(y)+1);
+  ctx.fillStyle=col; ctx.fillText(s,Math.round(x),Math.round(y));
+}
+function personIcon(x,y,col){ R(x+1,y,2,2,col); R(x,y+2,4,3,col); R(x,y+5,1,2,col); R(x+3,y+5,1,2,col); }
+function tankIcon(x){ R(x,6,8,3,C.lgrey); R(x+2,4,4,2,C.lgrey); R(x+6,4,4,1,C.lgrey); }
+
+function drawTimer(x){
+  const s=Math.ceil(S.timeLeft/60), str=Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+  const warn=s<=30 && (S.t>>4)%2;
+  txt(str,x,2,warn?C.lava1:C.lava2);
+}
+function drawHUD(){
+  R(0,0,W,12,C.black);
+  for(let i=0;i<Math.max(0,S.lives);i++){
+    const x=6+i*12;
+    R(x,4,6,3,C.green); R(x+5,4,2,3,C.cyan); R(x-4,5,4,1,C.green); R(x-1,2,9,1,C.white); R(x,8,7,1,C.dgrey);
+  }
+  const h=S.heli, M=S.M, pass=h&&h.alive?h.pass:0;
+  if(M.kind==='dogfight'){
+    R(70,5,10,2,C.lgrey); R(74,3,2,6,C.lgrey); R(70,3,1,3,C.lgrey);
+    txt(String(S.planes.filter(p=>!p.dead).length),84,2,C.lred);
+    txt('Rosso = fatale',104,2,C.lred);
+  }else if(M.kind==='rescue'||M.kind==='evac'){
+    personIcon(70,2,C.lgreen); txt(String(S.saved),76,2,C.lgreen);
+    personIcon(98,2,C.white); txt(pass+'/'+S.cap,104,2,C.white);
+    personIcon(150,2,C.lred); txt(String(S.dead),156,2,C.lred);
+    const left=S.total-S.saved-S.dead-pass-(h&&h.alive&&h.vipAboard?8:0);
+    personIcon(178,2,C.lgrey); txt(String(left),184,2,C.lgrey);
+    if(M.timer) drawTimer(206);
+    else if(M.tanks>0){ tankIcon(208); txt(String(S.tanks.length),220,2,C.lgrey); }
+  }else{
+    R(70,3,7,6,h&&h.alive&&h.cargo?C.orange:C.dgrey); R(70,5,7,1,C.brown);
+    personIcon(84,2,C.khaki); txt(String(pass),90,2,C.khaki);
+    R(104,4,8,1,C.cyan); R(110,3,1,3,C.cyan); R(104,8,8,1,C.cyan); R(105,7,1,3,C.cyan);
+    txt(S.trips+'/'+M.trips,116,2,C.cyan);
+    personIcon(150,2,C.lred); txt(String(S.dead),156,2,C.lred);
+    tankIcon(176); txt(String(S.tanks.length),188,2,C.lgrey);
+    if(M.timer) drawTimer(206);
+  }
+  txt('M'+(S.level+1),246,2,C.lava2);
+  if(h && h.alive){
+    const col=h.hp>=3?C.lgreen:h.hp===2?C.yellow:C.lred;
+    for(let i=0;i<3;i++) R(282+i*11,2,9,4,i<h.hp?col:C.dgrey);
+    const f=h.fuel/FUEL_MAX, fc=f>0.5?C.cyan:f>0.25?C.yellow:C.lava1;
+    R(282,8,31,2,C.dgrey);
+    if(h.fuel>0) R(282,8,Math.max(1,Math.round(31*f)),2,fc);
+    else if((S.t>>3)&1) R(282,8,31,2,C.lred);
+  }
+}
+function drawMinimap(){
+  R(0,191,W,9,C.black);
+  const sc=(W-8)/S.world, ox=4, y=194, M=S.M;
+  R(ox,y+3,W-8,1,C.dgrey);
+  if(M.kind==='rescue') R(ox+M.baseX*sc,y+1,(S.world-M.baseX)*sc,3,C.flagBlue);
+  else if(M.terrain==='sea'){ R(ox+COAST*sc,y+3,(S.world-COAST)*sc,1,C.lblue); R(ox,y+1,300*sc,3,C.flagBlue); R(ox+CARRIER0*sc,y+1,(CARRIER1-CARRIER0)*sc,3,C.lgrey); }
+  else { R(ox,y+1,300*sc,3,C.flagBlue); R(ox+(S.world-300)*sc,y+1,300*sc,3,C.orange); }
+  if(M.terrain==='vesuvio') R(ox,y+2,S.lavaX*sc,2,C.lava1);
+  for(const c of (M.camps||[])) R(ox+c.x*sc-1,y+1,3,3,C.white);
+  if(M.palace) R(ox+PALACE_DOOR*sc-1,y+1,3,3,S.palaceCalled&&(S.t>>3)&1?C.gold:C.white);
+  for(const b of S.bunkers) R(ox+(b.x+b.w/2)*sc-1,y+1,3,3,b.open?(b.inside>0?C.yellow:C.grey):C.lgrey);
+  for(const p of S.people) R(ox+p.x*sc,y+2,1,1,C.lgreen);
+  for(const t of S.tanks) R(ox+t.x*sc,y+2,2,2,C.lred);
+  for(const p of S.planes) if(p.flying) R(ox+p.x*sc,y,2,1,C.lred);
+  const h=S.heli;
+  if(h.alive && (S.t>>3)%2) R(ox+h.x*sc-1,y,3,2,C.lava2);
+  const vx=ox+S.camX*sc, vw=W*sc;
+  R(vx,y-1,vw,1,C.lgrey); R(vx,y+4,vw,1,C.lgrey);
+}
+function panel(x,y,w,h){ R(x,y,w,h,C.black); R(x,y,w,1,C.lblue); R(x,y+h-1,w,1,C.lblue); R(x,y,1,h,C.lblue); R(x+w-1,y,1,h,C.lblue); }
+function blink(){ return (S.t>>5)%2===0; }
+const tapOr=(t,k)=>coarse?'Tocca per '+t:k+' per '+t;
+
+function threatLines(M){
+  if(M.threats) return M.threats;
+  if(M.tanks===0 && M.jets===0) return ['Nessun nemico','Posti a bordo: '+M.cap];
+  const a=['Carri armati: '+M.tanks];
+  if(M.jets>0) a.push('Aerei: '+M.jets);
+  a.push(M.keep>0?M.keep+' carri sempre in campo':'I nemici distrutti non tornano');
+  if(M.palace) a.push('Infine: il presidente al palazzo');
+  return a;
+}
+function arrowTo(left){
+  if(!(S.t>>4)%2) return;
+  if(left){ for(let i=0;i<5;i++) R(10+i,90-i,1,1+i*2,C.lava2); R(15,89,8,3,C.lava2); }
+  else { for(let i=0;i<5;i++) R(W-14+i,86+i,1,9-i*2,C.lava2); R(W-22,89,8,3,C.lava2); }
+}
+
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+  drawBases();
+  drawCamps();
+  for(const b of S.bunkers) drawBunker(b);
+  for(const p of S.people) drawPerson(p);
+  for(const t of S.tanks) drawTank(t);
+  drawHeli(S.heli);
+  for(const p of S.planes) if(p.flying) drawPlane(p);
+  for(const b of S.bullets) R(b.x-S.camX,b.y,3,1,C.lava2);
+  for(const b of S.bombs){ const x=b.x-S.camX; R(x-1,b.y-2,2,4,C.dgrey); R(x-1,b.y-3,2,1,C.grey); }
+  for(const s of S.shells){
+    const x=s.x-S.camX;
+    if(s.kind==='mg') R(x-1,s.y,s.fatal?3:2,1,s.fatal?C.lava1:C.white);
+    else R(x-1,s.y-1,2,2,(S.t>>1)&1?C.white:C.lred);
+  }
+  for(const p of S.parts) R(p.x-S.camX,p.y,p.s,p.s,p.col);
+  const T=THEMES[S.M.theme];
+  if(T.rain) for(let k=0;k<50;k++){ const x=mod(k*53-S.t*1.5,W), y=12+mod(k*29+S.t*4,180); R(x,y,1,3,C.lgrey); }
+
+  const h=S.heli, M=S.M;
+  if(S.mode==='play' && h.alive){
+    if(M.kind==='rescue' && h.pass>0 && M.baseX-S.camX>W) arrowTo(false);
+    if(M.kind==='evac'){ if(h.pass>0 && CARRIER0-S.camX>W) arrowTo(false); if(h.pass===0 && 300-S.camX<0) arrowTo(true); }
+    if(M.kind==='dogfight' && S.planes.every(p=>p.dead) && CARRIER0-S.camX>W) arrowTo(false);
+    if(M.palace && S.palaceCalled && h.pass===0 && PALACE_DOOR-S.camX<0) arrowTo(true);
+    if(M.kind==='airlift'){
+      if(h.cargo && S.world-300-S.camX>W) arrowTo(false);
+      if(h.pass>0 && 300-S.camX<0) arrowTo(true);
+    }
+  }
+  drawHUD();
+  drawMinimap();
+  if(S.mode==='play' && S.msgT>0 && S.msg) txt(S.msg,W/2,40,C.white,8,'center');
+
+  if(S.mode==='title'){
+    panel(10,22,300,146);
+    txt('Elicottero 1944',W/2,34,C.lava2,16,'center');
+    txt('Le missioni del Capitano',W/2,58,C.white,8,'center');
+    txt('Jack \u201cGrizzly\u201d Miller',W/2,70,C.khaki,8,'center');
+    txt('16 missioni, 1944-1975',W/2,88,C.cyan,8,'center');
+    txt('Vesuvio Berlino Corea Cuba Vietnam',W/2,100,C.cyan,8,'center');
+    txt(coarse?'Croce vola  Fuoco  Bomba':'Frecce  Spazio fuoco  X bomba',W/2,118,C.lgrey,8,'center');
+    if(blink()) txt(coarse?'Tocca per partire':'Premi spazio per partire',W/2,136,C.lgreen,8,'center');
+    if(best>0) txt('Record: '+best+' salvati',W/2,152,C.lgrey,8,'center');
+  }
+  if(S.mode==='intro'){
+    panel(10,20,300,152);
+    txt('Missione '+(S.level+1)+' di '+MISSIONS.length,W/2,28,C.lgrey,8,'center');
+    txt(M.name,W/2,40,C.lava2,16,'center');
+    txt(M.date,W/2,60,C.cyan,8,'center');
+    M.brief.forEach((s,i)=>txt(s,W/2,74+i*10,C.white,8,'center'));
+    threatLines(M).forEach((s,i)=>txt(s,W/2,110+i*10,(M.tanks===0&&M.jets===0&&!M.tripSpawn)?C.lgreen:C.lred,8,'center'));
+    if(S.introT>30 && blink()) txt(tapOr('decollare','Spazio'),W/2,156,C.lgreen,8,'center');
+  }
+  if(S.mode==='roll'||S.mode==='clear'||S.mode==='retry'){
+    panel(20,28,280,136);
+    const air=M.kind==='airlift';
+    if(S.mode==='roll') txt('Rapporto al comando',W/2,38,C.lava2,8,'center');
+    else if(S.mode==='clear') txt(air?'Berlino rifornita':M.kind==='dogfight'?'Cielo libero':'Missione superata',W/2,38,C.lava2,8,'center');
+    else txt('Missione non superata',W/2,38,C.lred,8,'center');
+    if(M.kind==='dogfight') txt('Aerei abbattuti: '+S.planes.filter(p=>p.dead).length+' su '+S.planes.length,W/2,54,C.lgreen,8,'center');
+    else if(air) txt('Viaggi '+S.trips+' su '+M.trips+'  Salvati '+S.saved,W/2,54,C.lgreen,8,'center');
+    else txt('Salvati '+S.saved+' su '+S.total+' ('+Math.round(S.pct*100)+'%)',W/2,54,C.lgreen,8,'center');
+    if(S.failReason==='roll'){
+      const bx=40,bw=240,by=72;
+      R(bx-1,by-1,bw+2,10,C.lblue); R(bx,by,bw,8,C.red); R(bx,by,Math.round(bw*S.pct),8,C.green);
+      const pos=S.mode==='roll'?rollPos():S.rollTarget;
+      R(bx+Math.round(pos*bw)-1,by-4,3,16,C.white);
+      txt('Verde = missione superata',W/2,88,C.lgrey,8,'center');
+    }else if(S.failReason) txt(S.failReason==='time'?'Tempo scaduto':S.failReason==='president'?'Il presidente è morto':'Elicotteri esauriti',W/2,76,C.lred,8,'center');
+    if(S.mode==='roll'){ if(blink()) txt('Valutazione in corso',W/2,112,C.white,8,'center'); }
+    else if(S.mode==='clear'){
+      if(S.bonus) txt(S.bonus>1?'+'+S.bonus+' elicotteri':'Elicottero extra',W/2,106,C.cyan,8,'center');
+      txt('Prossima: '+MISSIONS[S.level+1].name,W/2,120,C.white,8,'center');
+      if(S.overT>50 && blink()) txt(tapOr('continuare','Spazio'),W/2,146,C.lgreen,8,'center');
+    }else{
+      txt('Ripetizioni rimaste: '+(2-S.retriesUsed),W/2,106,C.cyan,8,'center');
+      txt('Puoi ripetere la missione',W/2,120,C.white,8,'center');
+      if(S.overT>50 && blink()) txt(tapOr('ripetere','Spazio'),W/2,146,C.lgreen,8,'center');
+    }
+  }
+  if(S.mode==='over'||S.mode==='win'){
+    panel(16,28,288,136);
+    const win=S.mode==='win';
+    txt(win?'Missione compiuta, Grizzly':'Missione fallita',W/2,40,win?C.lava2:C.lred,8,'center');
+    if(!win) txt('Ultima missione: '+M.name,W/2,54,C.lgrey,8,'center');
+    else txt('Il Capitano torna a casa',W/2,54,C.khaki,8,'center');
+    txt('Salvati '+S.totSaved+' su '+S.totAll,W/2,72,C.lgreen,8,'center');
+    txt('Persi '+S.totDead,W/2,86,C.lred,8,'center');
+    const pct=S.totAll?S.totSaved/S.totAll:0;
+    const r=!win?'Riprova, pilota':pct>=0.9?'Medaglia d\u2019onore':pct>=0.7?'Pilota esperto':pct>=0.4?'Recluta promettente':'Torna ad addestrarti';
+    txt(r,W/2,104,C.white,8,'center');
+    if(S.newBest) txt('Nuovo record!',W/2,118,C.cyan,8,'center');
+    if(S.overT>50 && blink()) txt(tapOr('rigiocare','Spazio'),W/2,142,C.lgreen,8,'center');
+  }
+  if(paused && S.mode==='play'){ panel(100,80,120,30); txt('Pausa',W/2,91,C.white,8,'center'); }
+  if(muted) txt('Muto',W-4,182,C.white,8,'right');
+}
+
+// ---------- Ciclo ----------
+titleState();
+fit();
+let last=performance.now(), acc=0;
+const STEP=1000/60;
+function frame(now){
+  acc+=Math.min(100,now-last); last=now;
+  while(acc>=STEP){ if(!paused) update(); acc-=STEP; }
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+if(document.fonts && document.fonts.load) document.fonts.load('8px "Press Start 2P"').catch(()=>{});
+})();
+</script>
+</body>
+</html>
